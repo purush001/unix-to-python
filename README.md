@@ -499,26 +499,29 @@ All codes are defined once in `src/pipeline/issue-codes.ts`. Code compares codes
 
 ## Palette
 
-A pale gold wash sits behind the hero and key panels; the headline and accents are a deep burnt
-orange, dark enough to pass WCAG AA on gold. Contrast ratios were computed, not estimated; the full
-list (including every editor token colour) is in the comment block at the top of `src/app/globals.css`.
+"Aurora": a midnight-indigo hero lit by violet, pink, cyan and amber, over a light lavender
+workbench with white cards. The headline, primary buttons and stage track use a violet-to-pink
+gradient. Contrast ratios were computed, not estimated; the full list (including every editor
+token colour) is in the comment block at the top of `src/app/globals.css`.
 
 | Role | Hex | Contrast |
 |---|---|---|
-| Page cream | `#FFF8E1` | background |
-| Panel paper | `#FFFDF5` | background |
-| Gold wash | `#FBEBB0` | background |
-| Gold | `#F5D56B` | background (darkest hero point) |
-| Headline burnt orange | `#9A3A00` | 5.91 on wash, 4.90 on gold, 6.63 on cream |
-| Accent orange | `#A84300` | 5.70 on cream, 5.08 on wash; cream text on it 5.70 |
-| Body ink | `#2A1B0C` | 15.68 on cream, 13.97 on wash, 11.59 on gold |
-| Muted text | `#5A452D` | 8.51 on cream, 7.58 on wash |
-| Bronze (borders) | `#8F6A12` | 4.66 on cream, 4.16 on wash |
-| Error | `#9B1C1C` | 8.00 on paper |
-| Warning | `#7A4A00` | 7.35 on paper |
-| OK | `#1F5E3A` | 7.58 on paper |
-| Source editor | paper `#FFFDF5` | text 16.36; keyword `#9A3A00` 6.92; string `#6B5200` 7.28; comment `#6E5A40` 6.44 |
-| Target editor | ink `#21160D` | text `#F6E7C8` 14.50; keyword `#FFB45E` 10.08; string `#F5D56B` 12.33; comment `#BFA98A` 7.81 |
+| Page lavender | `#F5F3FF` | background |
+| Card surface | `#FFFFFF` | background |
+| Tint | `#EDE9FE` | background (hover, soft fills) |
+| Hero night | `#120B33` to `#2E1065` | background |
+| Brand violet (titles) | `#5B21B6` | 8.98 on white, 8.19 on lavender |
+| Accent violet (links, UI) | `#6D28D9` | 7.10 on white, 6.48 on lavender |
+| Primary button gradient | `#6D28D9` → `#A21CAF` → `#BE185D` | white text 7.10 / 6.32 / 6.04 |
+| Body ink | `#1A1433` | 17.62 on white, 16.07 on lavender |
+| Muted text | `#57527A` | 7.26 on white, 6.62 on lavender |
+| Line (inputs, UI shapes) | `#7466CC` | 4.65 on white, 4.24 on lavender |
+| Hero text | `#ECE9FF` | 12.54 or better on the hero |
+| Error | `#BE123C` | 6.29 on white |
+| Warning | `#92400E` | 7.09 on white |
+| OK | `#046648` | 7.00 on white |
+| Source editor | white `#FFFFFF` | text 17.62; keyword `#6D28D9` 7.10; string `#9D174D` 7.88; comment `#5F5985` 6.45 |
+| Target editor | night `#140F2E` | text `#ECE9FF` 15.53; keyword `#C4B5FD` 10.00; string `#F9A8D4` 10.18; comment `#A5A1C8` 7.50 |
 
 System font stacks only; no third-party fonts, scripts or analytics. The first-load animation lasts
 under 6 seconds, can be skipped (button or Escape), plays once per session and is replaced by its
