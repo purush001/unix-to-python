@@ -6,7 +6,14 @@ import { providerModes } from '@/providers';
 /** GET /api/status — recent runs, metrics and the learned rules with their witnesses. */
 export const GET = route('token', async (ctx) => {
   const s = ctx.providers.storage;
-  const [runs, logs, feedback, rules, pendingRules, pendingExamples] = await Promise.all([s.listRuns(200), s.listLogs(2000), s.listFeedback(500), s.listRules(), s.listRules({ unindexedOnly: true }), s.listExamples({ unindexedOnly: true })]);
+  // One query at a time: the transaction-mode pooler does not handle several statements
+  // pipelined on a single connection.
+  const runs = await s.listRuns(200);
+  const logs = await s.listLogs(2000);
+  const feedback = await s.listFeedback(500);
+  const rules = await s.listRules();
+  const pendingRules = rules.filter((r) => !r.indexed);
+  const pendingExamples = await s.listExamples({ unindexedOnly: true });
   const view: StatusView = {
     providers: providerModes(),
     runs: runs.slice(0, 25).map((r) => {
