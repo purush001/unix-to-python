@@ -290,7 +290,7 @@ export function Modernizer() {
     if (!token || !run || !draft) return;
     try {
       setRun(await api.dismiss(token, run.id, { version: draft.version, kind, index, dismissed }));
-      setAnnouncement(dismissed ? 'Removed from view. It stays in the record and can be restored.' : 'Restored.');
+      setAnnouncement(dismissed ? 'Deleted from the list. It can be restored until you approve.' : 'Restored.');
     } catch (e) {
       fail(e);
     }

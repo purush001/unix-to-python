@@ -389,8 +389,8 @@ again; the selector overrides the detection for everything except those wrong co
   output guardrails as model output (hosts, names and secrets are replaced and reported) and the
   same code validators. No model is called, so the independent review does not run on a hand edit;
   the new version carries the warning `DRAFT_EDITED_BY_REVIEWER`. `script_runtime.py` cannot be edited.
-- **Remove from view.** Each change-list item and each warning has a "Remove" button. Removed items
-  move to a "Removed from view" list and can be restored. Nothing is deleted: they stay in the
+- **Delete from the lists.** Each change-list item and each warning has a "Delete" button. Deleted items
+  move to a "Deleted" list and can be restored. Nothing is deleted: they stay in the
   stored draft and are marked as removed in the saved `report.md`. An error cannot be removed; it
   has to be fixed. After approval the lists are a fixed record.
 - **Change the output from the feedback panel.** Each entry has two actions. "Change output" opens

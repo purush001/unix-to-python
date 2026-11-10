@@ -26,7 +26,7 @@ function where(i: IssueView): string {
   return 'whole script';
 }
 
-function IssueItem({ issue, index, active, onSelect, onReport, onRemove, onEdit, onFix }: { issue: IssueView; index: number; active: boolean; onSelect: Props['onSelect']; onReport: Props['onReport']; onRemove: (() => void) | null; onEdit: (() => void) | null; onFix: (() => void) | null }) {
+function IssueItem({ issue, index, active, onSelect, onReport, onRemove, canRemoveOthers, onEdit, onFix }: { issue: IssueView; index: number; active: boolean; onSelect: Props['onSelect']; onReport: Props['onReport']; onRemove: (() => void) | null; canRemoveOthers: boolean; onEdit: (() => void) | null; onFix: (() => void) | null }) {
   const id = useId();
   const [open, setOpen] = useState(false);
   const [comment, setComment] = useState('');
@@ -101,9 +101,14 @@ function IssueItem({ issue, index, active, onSelect, onReport, onRemove, onEdit,
             Report a problem
           </button>
         )}
+        {!onRemove && canRemoveOthers && issue.severity === 'error' ? (
+          <button type="button" className="btn btn-small btn-ghost" disabled title="An error cannot be deleted. Fix it with Change output or Ask for a fix." data-testid="issue-remove-blocked">
+            Delete<span className="sr-only"> is not available: an error has to be fixed</span>
+          </button>
+        ) : null}
         {onRemove ? (
           <button type="button" className="btn btn-small btn-ghost" onClick={onRemove} data-testid="issue-remove">
-            Remove<span className="sr-only"> this {issue.severity} from the list</span>
+            Delete<span className="sr-only"> this {issue.severity} from the list</span>
           </button>
         ) : null}
       </div>
@@ -153,7 +158,7 @@ export function FeedbackPanel({ issues, activeIndex, onSelect, onReport, dismiss
             Select an entry to jump to its line in the target script. Lines traced back to the source are marked there too.
             {canChange ? ' Use "Change output" to edit the target at that line yourself, or "Ask for a fix" to get a new draft.' : ''}
           </p>
-          {shown.length === 0 ? <p className="quiet">Every warning was removed from view.</p> : null}
+          {shown.length === 0 ? <p className="quiet">Every warning was deleted from the list.</p> : null}
           <ol className="issues" data-testid="issue-list">
             {shown.map(({ i, n }) => (
               <IssueItem
@@ -165,6 +170,7 @@ export function FeedbackPanel({ issues, activeIndex, onSelect, onReport, dismiss
                 onReport={onReport}
                 // an error can never be removed: it has to be fixed
                 onRemove={canDismiss && i.severity !== 'error' ? () => onDismiss(n, true) : null}
+                canRemoveOthers={canDismiss}
                 onEdit={canChange ? () => onEdit(i, n) : null}
                 onFix={canChange ? () => onFix(i) : null}
               />
@@ -173,9 +179,9 @@ export function FeedbackPanel({ issues, activeIndex, onSelect, onReport, dismiss
           {hidden.length > 0 ? (
             <details className="removed" data-testid="issues-removed">
               <summary>
-                Removed from view <span className="count">{hidden.length}</span>
+                Deleted <span className="count">{hidden.length}</span>
               </summary>
-              <p className="quiet">These stay in the record and in the saved report, marked as removed.</p>
+              <p className="quiet">Deleted from this list. They stay in the saved record, marked as deleted, and can be restored until you approve.</p>
               <ul className="removed-list">
                 {hidden.map(({ i, n }) => (
                   <li key={`${i.code}-${n}`}>

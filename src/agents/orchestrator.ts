@@ -403,7 +403,7 @@ export async function setDismissed(run: RunRecord, version: number, kind: 'chang
   if (!draft) throw new AppError('NOT_FOUND', 'No such draft version.', 404, run.id);
   const list = kind === 'change' ? draft.result.changes : draft.result.issues;
   if (index < 0 || index >= list.length) throw new AppError('BAD_REQUEST', 'No such item.', 400, run.id);
-  if (kind === 'issue' && draft.result.issues[index].severity === 'error') throw new AppError('ISSUE_NOT_DISMISSIBLE', 'An error cannot be removed from the list. Fix it by editing the target or requesting changes.', 422, run.id);
+  if (kind === 'issue' && draft.result.issues[index].severity === 'error') throw new AppError('ISSUE_NOT_DISMISSIBLE', 'An error cannot be deleted from the list. Fix it by editing the target or asking for a fix.', 422, run.id);
   const d = (draft.dismissed ??= { changes: [], issues: [] });
   const key = kind === 'change' ? 'changes' : 'issues';
   const set = new Set(d[key]);
