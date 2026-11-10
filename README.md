@@ -243,6 +243,20 @@ suggestions. Those need the real provider.
 
 ## Vercel deployment
 
+**Current state (2026-11-10).** A Vercel project `unix-to-python` is linked to this repository.
+`main` is an intentionally empty production branch (nothing is deployed from it), so every push to
+`claude/script-modernizer` creates a **preview** deployment protected by Vercel Authentication.
+`APP_ACCESS_TOKEN` and `CRON_SECRET` are set as sensitive variables for the Preview environment.
+Verified on a preview: the build, the page with its CSP header, `/api/health`, `/api/convert`
+(including the WASM Python parser) and `/api/runs/:id/revise`. **Not working on a preview that is
+fully on mocks:** `approve`, `GET /api/runs/:id`, `feedback` and `status` return 404 for a run
+created by `convert`, because the in-memory mock storage is not shared between function instances
+(see "Preview deployments and storage" below). Set `STORAGE_PROVIDER=supabase` to run the whole flow.
+
+Two things to know when creating a project like this one: Vercel sends a new project's **first**
+deployment to production whatever flags are used, and it takes the repository's only branch as the
+production branch. Create the production branch first.
+
 > Limits and names below were checked against Vercel documentation **through search summaries and
 > the published `@vercel/config` types, not by reading the pages directly** (the documentation hosts
 > were not reachable from the build environment). Re-check them in your account.
@@ -458,7 +472,7 @@ end state when `prefers-reduced-motion` is set.
 
 - **Real providers** other than Postgres storage were not run against live services (no keys in the
   build environment). The Postgres implementation was run against a local PostgreSQL 16, not Supabase.
-- **No Vercel deployment was made** (no Vercel access). `vercel build` was not run; `next build` was.
+- **Vercel:** preview deployments build and run; the full flow was verified only for `convert` and `revise` there (mock storage is per function instance). No production deployment exists. Cron jobs run on production only, so they have not run on Vercel.
 - **Documentation checks.** Oracle facts were read on docs.oracle.com. Vercel, Supabase, Chroma and
   Voyage facts came from package sources and search summaries because those sites were unreachable.
 - **Mock converter scope** — see "Switching from mocks to real providers".
