@@ -770,6 +770,12 @@ textarea {
   color: var(--ok);
   background: var(--paper);
 }
+.stamp-approved {
+  color: var(--warn);
+  background: var(--paper);
+  border-style: double;
+  border-width: 5px;
+}
 .target-version {
   font-weight: 700;
 }
@@ -1307,8 +1313,8 @@ textarea {
   gap: 20px;
   align-items: start;
 }
-.span-2 {
-  grid-column: span 2;
+.span-all {
+  grid-column: 1 / -1;
 }
 .pairs {
   display: grid;
@@ -1428,9 +1434,6 @@ textarea {
   }
   .status-grid {
     grid-template-columns: minmax(0, 1fr);
-  }
-  .span-2 {
-    grid-column: auto;
   }
   .tape {
     transform: none;

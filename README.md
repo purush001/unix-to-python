@@ -429,7 +429,30 @@ All codes are defined once in `src/pipeline/issue-codes.ts`. Code compares codes
 
 ## Palette
 
-PALETTE_PLACEHOLDER
+A pale gold wash sits behind the hero and key panels; the headline and accents are a deep burnt
+orange, dark enough to pass WCAG AA on gold. Contrast ratios were computed, not estimated; the full
+list (including every editor token colour) is in the comment block at the top of `src/app/globals.css`.
+
+| Role | Hex | Contrast |
+|---|---|---|
+| Page cream | `#FFF8E1` | background |
+| Panel paper | `#FFFDF5` | background |
+| Gold wash | `#FBEBB0` | background |
+| Gold | `#F5D56B` | background (darkest hero point) |
+| Headline burnt orange | `#9A3A00` | 5.91 on wash, 4.90 on gold, 6.63 on cream |
+| Accent orange | `#A84300` | 5.70 on cream, 5.08 on wash; cream text on it 5.70 |
+| Body ink | `#2A1B0C` | 15.68 on cream, 13.97 on wash, 11.59 on gold |
+| Muted text | `#5A452D` | 8.51 on cream, 7.58 on wash |
+| Bronze (borders) | `#8F6A12` | 4.66 on cream, 4.16 on wash |
+| Error | `#9B1C1C` | 8.00 on paper |
+| Warning | `#7A4A00` | 7.35 on paper |
+| OK | `#1F5E3A` | 7.58 on paper |
+| Source editor | paper `#FFFDF5` | text 16.36; keyword `#9A3A00` 6.92; string `#6B5200` 7.28; comment `#6E5A40` 6.44 |
+| Target editor | ink `#21160D` | text `#F6E7C8` 14.50; keyword `#FFB45E` 10.08; string `#F5D56B` 12.33; comment `#BFA98A` 7.81 |
+
+System font stacks only; no third-party fonts, scripts or analytics. The first-load animation lasts
+under 6 seconds, can be skipped (button or Escape), plays once per session and is replaced by its
+end state when `prefers-reduced-motion` is set.
 
 ## Known limits and unverified items
 

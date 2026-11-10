@@ -221,7 +221,7 @@ export function StatusPanel({ token, onUnauthorized, refreshKey }: Props) {
             </dl>
           </section>
 
-          <section className="panel span-2" aria-labelledby="st-runs">
+          <section className="panel span-all" aria-labelledby="st-runs">
             <h3 id="st-runs" className="panel-title">
               Recent runs <span className="count">{data.runs.length}</span>
             </h3>
@@ -263,7 +263,7 @@ export function StatusPanel({ token, onUnauthorized, refreshKey }: Props) {
             )}
           </section>
 
-          <section className="panel span-2" aria-labelledby="st-rules">
+          <section className="panel span-all" aria-labelledby="st-rules">
             <h3 id="st-rules" className="panel-title">
               Learned rules <span className="count">{data.rules.length}</span>
             </h3>

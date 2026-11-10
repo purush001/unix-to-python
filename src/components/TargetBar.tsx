@@ -26,8 +26,8 @@ export function TargetBar({ run, draft, fileName, showDiff, diffBase, onVersion,
   return (
     <div className="target-bar">
       <div className="target-id">
-        <span className={`stamp ${isFinal ? 'stamp-final' : 'stamp-draft'}`} data-testid="target-label">
-          {isFinal ? 'Final' : 'Draft'}
+        <span className={`stamp ${isFinal ? (run.state === 'saved' ? 'stamp-final' : 'stamp-approved') : 'stamp-draft'}`} data-testid="target-label">
+          {isFinal ? (run.state === 'saved' ? 'Final' : 'Approved, not saved') : 'Draft'}
         </span>
         <span className="target-version" data-testid="draft-version">
           version {draft.version} of {run.drafts.length}

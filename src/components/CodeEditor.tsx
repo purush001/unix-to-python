@@ -101,7 +101,8 @@ export function CodeEditor({ value, onChange, readOnly = false, language, tone, 
   useEffect(() => {
     const v = view.current;
     if (!v) return;
-    if (v.state.doc.toString() !== value) v.dispatch({ changes: { from: 0, to: v.state.doc.length, insert: value } });
+    // replaced from outside (new draft, sanitized source, example): start again at the top
+    if (v.state.doc.toString() !== value) v.dispatch({ changes: { from: 0, to: v.state.doc.length, insert: value }, selection: { anchor: 0 }, effects: EditorView.scrollIntoView(0) });
   }, [value]);
 
   useEffect(() => {

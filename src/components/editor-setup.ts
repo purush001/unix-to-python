@@ -99,7 +99,7 @@ export function editorTheme(tone: EditorTone): Extension {
       '.cm-tooltip': { backgroundColor: c.gutterBg, color: c.text, border: `1px solid ${c.gutterText}` },
       '.cm-changedLine': { backgroundColor: tone === 'paper' ? '#DDEFD5' : '#1E3A2A' },
       '.cm-deletedChunk': { backgroundColor: tone === 'paper' ? '#F8D9CF' : '#4A1F1A' },
-      '.cm-changedText, .cm-deletedText, .cm-deletedLine .cm-deletedText': { background: 'none', textDecoration: 'none' },
+      '.cm-changedText, .cm-deletedText, .cm-deletedLine .cm-deletedText': { background: 'none !important', textDecoration: 'none' },
       '.cm-deletedLine, .cm-deletedLine del': { textDecoration: 'none' },
       '.cm-collapsedLines': { backgroundColor: c.gutterBg, color: c.text, backgroundImage: 'none', padding: '4px 12px' },
       '.cm-changeGutter': { width: '4px' },
