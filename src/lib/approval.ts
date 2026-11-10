@@ -95,7 +95,7 @@ export async function approveRun(run: RunRecord, deps: { providers: Providers; l
     log.info('conversion saved', { branch: res.branch, files: files.length });
   } catch (e) {
     const leak = e instanceof SanitizerLeakError;
-    run.save = { status: 'failed', error: leak ? 'The pre-commit scan found a protected item, so nothing was committed.' : redact(e instanceof Error ? e.message : 'GitHub save failed') };
+    run.save = { status: 'failed', error: leak ? `The pre-commit scan found a protected item in ${(e as SanitizerLeakError).where.split('/').pop()}, so nothing was committed.` : redact(e instanceof Error ? e.message : 'GitHub save failed') };
     log.error('github save failed', { leak, error: run.save.error });
     try {
       await deps.providers.smtp.send({ to: getConfig('OPS_EMAIL'), subject: `Script Modernizer: GitHub save failed for ${run.id}`, text: `Run ${run.id} is approved but could not be saved: ${run.save.error}\nRetry from the application.` });

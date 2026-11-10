@@ -136,7 +136,7 @@ export function secretPass(text: string, ctx: Ctx, lang: Lang): string {
       /^(\s*["']?(?:\w*(?:password|passwd|passphrase|secret|token|api_?key)\w*)["']?\s*[:=]\s*)(?:(["'])((?:(?!\2).)+)\2|([^\s"'#;,(){}[\]]+))\s*(,?)\s*$/gim,
       (m, pre: string, _q: string | undefined, quoted: string | undefined, bare: string | undefined, comma: string) => {
         const v = quoted ?? bare ?? '';
-        if (isReference(v)) return m;
+        if (isReference(v) || /^(\d+|true|false|null|none)$/i.test(v)) return m; // counters and flags are not secrets
         if (lang === 'python' && quoted === undefined) return m; // unquoted in Python is an expression, not a literal
         if (lang === 'python' && /^(password|passwd|database|smtp|source|target|logging|secret|token)$/i.test(v)) return m; // config key names
         hit();

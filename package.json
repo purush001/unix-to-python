@@ -34,5 +34,19 @@
     "tsx": "4.23.15",
     "typescript": "7.0.2",
     "vitest": "5.1.0"
+  },
+  "scripts": {
+    "dev": "next dev",
+    "build": "npm run check-secrets && next build",
+    "start": "next start",
+    "typecheck": "tsc --noEmit",
+    "check-secrets": "tsx scripts/check-secrets.ts",
+    "test": "npm run check-secrets && vitest run",
+    "test:e2e": "playwright test --trace off",
+    "eval": "tsx evals/run.ts",
+    "verify-witness": "tsx scripts/verify-witness.ts",
+    "reindex-memory": "tsx scripts/reindex-memory.ts",
+    "db:migrate": "tsx scripts/migrate.ts",
+    "audit": "npm audit --audit-level=moderate"
   }
 }
