@@ -183,6 +183,8 @@ export interface SkillRule {
   rejectReason?: string;
   /** False until the rule's index state matches Chroma. */
   indexed?: boolean;
+  /** True once the promoted rule was mirrored to the data branch. */
+  mirrored?: boolean;
 }
 
 export interface ConversionExample {

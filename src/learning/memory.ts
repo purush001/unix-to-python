@@ -98,14 +98,16 @@ export async function retrieveGuidance(deps: Deps, input: { platform: Platform; 
       await indexRules(deps, [...BASE_RULES, ...(await deps.storage.listRules({ status: 'promoted' }))]);
       await indexExamples(deps, await deps.storage.listExamples());
     }
-    if (extra.length) await indexRules(deps, extra.map((r) => ({ ...r, status: 'promoted' as const })));
     assertClean(input.excerpt, 'memory:query');
     const [embedding] = await deps.embeddings.embed([`Constructs: ${input.tags.join(', ')}\n${input.excerpt}`], 'query');
     const rules = await deps.memory.query('skill_rules', { embedding, platform: input.platform, status: 'promoted', topK: TOP_RULES });
     const examples = await deps.memory.query('conversion_examples', { embedding, platform: input.platform, status: 'promoted', topK: TOP_EXAMPLES });
+    // candidate rules under evaluation are passed straight to the agent; they are never indexed
+    const candidates = extra.filter((r) => r.platform === input.platform && (r.trigger.length === 0 || r.trigger.some((t) => input.tags.includes(t))));
+    for (const c of candidates) assertClean(ruleDocument(c), `memory:${c.id}`);
     return {
-      guidance: [...rules.map((h) => ({ id: h.id, kind: 'rule' as const, text: h.document })), ...examples.map((h) => ({ id: h.id, kind: 'example' as const, text: h.document }))],
-      rules: rules.slice(0, TOP_RULES).map((h) => h.id),
+      guidance: [...candidates.map((r) => ({ id: r.id, kind: 'rule' as const, text: ruleDocument(r) })), ...rules.map((h) => ({ id: h.id, kind: 'rule' as const, text: h.document })), ...examples.map((h) => ({ id: h.id, kind: 'example' as const, text: h.document }))],
+      rules: [...candidates.map((r) => r.id), ...rules.slice(0, TOP_RULES).map((h) => h.id)],
       examples: examples.slice(0, TOP_EXAMPLES).map((h) => h.id),
       warning: null,
       ms: Date.now() - t0,

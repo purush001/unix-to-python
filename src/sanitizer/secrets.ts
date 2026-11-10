@@ -1,6 +1,6 @@
 import { Ctx, isReference, type Lang } from './context';
 
-const SECRET_NAME = String.raw`\w*(?:PASSWORD|PASSWD|PASSPHRASE|PASSWRD|SECRET|TOKEN|APIKEY|CREDENTIALS?)\w*|\w*_(?:PWD|PASS|PW)|PASS|PW|PWD_\w+|\w*(?:API|SSH|PRIVATE|ACCESS|AUTH|ENCRYPTION|SIGNING)_?KEY\w*`;
+const SECRET_NAME = String.raw`\w*(?:PASSWORD|PASSWD|PASSPHRASE|PASSWRD|SECRET|TOKEN|APIKEY|CREDENTIALS?)\w*|\w*_(?:PWD|PASS|PW)|\w+(?:PWD|PW)|PASS|PW|PWD_\w+|\w*(?:API|SSH|PRIVATE|ACCESS|AUTH|ENCRYPTION|SIGNING)_?KEY\w*`;
 const NOT_A_SECRET_NAME = /(_FILE|_PATH|_DIR|_LEN|_LENGTH|_EXPIR\w*|_PROMPT|_POLICY|_URL|_NAME|_ENV|_VAR|_COUNT|_SIZE|_TTL|_TIMEOUT)$/i;
 
 /** Known token shapes that are secrets wherever they appear. */
@@ -58,7 +58,7 @@ export function secretPass(text: string, ctx: Ctx, lang: Lang): string {
     .join('\n');
 
   // SQL: IDENTIFIED BY <password>
-  out = out.replace(/\b(IDENTIFIED\s+BY\s+(?:VALUES\s+)?)("[^"\n]*"|'[^'\n]*'|[^\s;,]+)/gi, (m, pre: string, pw: string) => {
+  out = out.replace(/\b(IDENTIFIED\s+BY\s+(?:VALUES\s+)?)("[^"\n]*"|'[^'\n]*'|[^\s;,'")]+)/gi, (m, pre: string, pw: string) => {
     if (isReference(pw) || /^"?&/.test(pw)) return m;
     hit();
     return `${pre}"&&db_password"`;
@@ -90,11 +90,18 @@ export function secretPass(text: string, ctx: Ctx, lang: Lang): string {
   out = out.replace(/(\bcurl\b[^\n]*?\s(?:-u|--user)\s+["']?)([^\s:"']+):([^\s"']+)/g, (m, pre: string, user: string, pw: string) => {
     if (isReference(pw)) return m;
     hit();
-    return `${pre}${user}:\${API_PASSWORD}`;
+    return `${pre}\${API_USER}:\${API_PASSWORD}`;
   });
   out = out.replace(/(\bAuthorization:\s*(?:Bearer|Basic|Token)\s+)([A-Za-z0-9._~+/=-]{8,})/gi, (m, pre: string) => {
     hit();
     return `${pre}\${API_TOKEN}`;
+  });
+
+  // A password quoted in prose or a comment: "the password is Xy7#abc"
+  out = out.replace(/\b((?:password|passwd|passphrase|pwd)\s+(?:is\s+|was\s+|to\s+)?)([^\s'"`,;()<>]{6,})/gi, (m, pre: string, pw: string) => {
+    if (isReference(pw) || !/\d/.test(pw) || !/[A-Za-z]/.test(pw) || !/[^A-Za-z]/.test(pw.replace(/\d/g, '')) && !/[A-Z]/.test(pw)) return m;
+    hit();
+    return `${pre}\${DB_PASSWORD}`;
   });
 
   // .netrc style: password <value>
