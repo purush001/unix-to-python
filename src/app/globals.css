@@ -578,6 +578,9 @@ textarea {
   color: var(--ink);
   margin-bottom: 4px;
 }
+.detected {
+  font-size: 0.8rem;
+}
 .field .field-label {
   margin-bottom: 0;
 }

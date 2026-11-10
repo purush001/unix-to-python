@@ -373,6 +373,15 @@ vercel build && vercel deploy --prebuilt     # preview deployment
    are passed to the agent and recorded in the witness. If Chroma is unreachable the conversion
    continues with the base rules and warning `MEMORY_UNAVAILABLE`.
 
+## Script type detection
+
+"Auto-detect" decides the type by rules, and after a conversion the page shows what it decided
+("Detected: …"). It accepts full scripts and everyday fragments: a query with no `;` (the built-in
+converter adds the missing terminator and lists it), or a few shell commands with no `#!` line.
+Text that reads like prose is still rejected, and so are HTML, JSON, Python and binary input. If
+auto-detect rejects something that is a script, choose its type under "Script type" and convert
+again; the selector overrides the detection for everything except those wrong content types.
+
 ## Reviewing a draft
 
 - **Edit the target.** "Edit" under the target editor makes the file editable. "Save as version N"

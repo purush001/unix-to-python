@@ -35,6 +35,9 @@ const UNSUPPORTED: [RegExp, string][] = [
 const SHELL_SIGNALS = [/^#!\s*\/\S*(sh|ksh|bash)\b/m, /^\s*(if\s+\[|fi\b|then\b|done\b|esac\b|export\s+\w+=|\w+=\$\(|\w+=`)/m, /\$\{?\w+\}?/, /<<-?\s*['"]?\w+/, /^\s*(echo|cd|rm|cp|mv|mkdir|scp|sftp|ssh|ftp|mailx|sqlplus|sqlldr|psae|psdmtx|pssqr|expdp|impdp|rman|exit)\b/m];
 const SQL_SIGNALS = /\b(select|insert\s+into|update|delete\s+from|merge\s+into|create\s+(or\s+replace\s+)?(table|index|view|procedure|function|package|trigger|sequence|synonym)|alter\s+(table|session|system|user)|drop\s+(table|index|view)|declare|begin|grant|truncate\s+table|audit)\b/i;
 
+/** A Ctrl-Z at the very end is the DOS end-of-file marker that old editors leave behind, not content. */
+const stripDosEof = (text: string): string => text.replace(/\u001a+\s*$/, '\n');
+
 function isJsonDocument(text: string): boolean {
   const t = text.trim();
   if (!/^[{[]/.test(t) || !/[}\]]$/.test(t)) return false;
@@ -47,7 +50,8 @@ function isJsonDocument(text: string): boolean {
 }
 
 /** Decides what kind of script was pasted. The user's selector overrides auto-detect. */
-export function classify(text: string, selected: SelectableType = 'auto'): { type: ScriptType; reason?: string } {
+export function classify(rawText: string, selected: SelectableType = 'auto'): { type: ScriptType; reason?: string } {
+  const text = stripDosEof(rawText);
   for (const [re, what] of UNSUPPORTED) if (re.test(text)) return { type: 'unsupported', reason: `This looks like ${what}.` };
   if (isJsonDocument(text)) return { type: 'unsupported', reason: 'This looks like a JSON document.' };
   if (selected !== 'auto') return { type: selected };
@@ -60,7 +64,41 @@ export function classify(text: string, selected: SelectableType = 'auto'): { typ
   if (hasPlsql(segs)) return { type: hasSqlplus(segs) ? 'sqlplus' : 'plsql' };
   if (hasSqlplus(segs) && (hasSql || segs.some((s) => s.kind === 'sqlplus' && /^\s*(exec|@|spool|whenever)/i.test(s.text)))) return { type: 'sqlplus' };
   if (hasSql) return { type: 'sql' };
+  // everyday input the strict rules miss: a query with no ";" or a few commands with no "#!" line
+  const lenient = classifyLenient(text);
+  if (lenient) return { type: lenient };
   return { type: 'unsupported', reason: 'No SQL, PL/SQL, SQL*Plus or shell statements were recognised (it reads like plain text).' };
+}
+
+const STOPWORDS = new Set(['the', 'a', 'an', 'is', 'are', 'was', 'were', 'be', 'been', 'please', 'you', 'your', 'we', 'our', 'i', 'me', 'my', 'that', 'this', 'these', 'those', 'will', 'would', 'should', 'could', 'have', 'has', 'had', 'because', 'thanks', 'let', 'know', 'anyone', 'it', 'its', 'they', 'them', 'their', 'of', 'about']);
+const SQL_START =
+  /^\s*(?:select\b[\s\S]*?\bfrom\b|insert\s+into\s+[\w."$]+|update\s+[\w."$]+\s+(?:\w+\s+)?set\b|delete\s+(?:from\s+)?[\w."$]+\s*(?:where\b|;|$)|merge\s+into\b|create\s+(?:or\s+replace\s+)?(?:global\s+temporary\s+|unique\s+|public\s+|materialized\s+)?(?:table|index|view|sequence|synonym|procedure|function|package|trigger|type|user|role|directory)\b|alter\s+(?:table|session|system|user|index)\b|drop\s+(?:table|index|view|sequence|synonym|procedure|function|package|trigger)\b|truncate\s+table\b|with\s+[\w"]+\s+as\s*\(|comment\s+on\b)/i;
+const SHELL_LINE =
+  /^(?:[A-Za-z_]\w*=\S*|\w+\s*\(\)\s*\{?\s*$|[{}]\s*$|(?:export|ls|cd|cp|mv|rm|mkdir|rmdir|touch|cat|echo|print|printf|grep|egrep|awk|sed|sort|uniq|wc|head|tail|cut|tr|find|xargs|tar|gzip|gunzip|zip|unzip|chmod|chown|date|sleep|kill|ps|df|du|nohup|sqlplus|sqlldr|expdp|impdp|rman|exp|imp|lsnrctl|tnsping|ssh|scp|sftp|ftp|rsync|mailx|mail|psae|psdmtx|pssqr|if|then|else|elif|fi|for|while|until|do|done|case|esac|function|return|exit|unset|source|trap|test|\[|\.)(?=\s|;|$))/;
+
+/**
+ * A second, more generous look. It accepts input that starts like a SQL statement, or whose
+ * lines mostly start with shell commands, as long as it does not read like prose. Command
+ * names are matched in lower case only, so "Find the file" is not taken for a command.
+ */
+function classifyLenient(text: string): ScriptType | null {
+  const code = text
+    .replace(/\/\*[\s\S]*?\*\//g, ' ')
+    .split('\n')
+    .filter((l) => !/^\s*(--|#|rem\b)/i.test(l))
+    .join('\n');
+  const bare = code.replace(/'(?:[^'\n]|'')*'|"[^"\n]*"/g, "''");
+  const lines = bare.split('\n').map((l) => l.trim()).filter(Boolean);
+  if (lines.length === 0) return null;
+  // prose: common English words, or lines that end like sentences
+  const words = bare.toLowerCase().match(/[a-z']+/g) ?? [];
+  const stop = words.filter((w) => STOPWORDS.has(w)).length;
+  if (words.length >= 5 && stop / words.length > 0.12) return null;
+  if (lines.filter((l) => /[a-z]{2,}[.!?]$/.test(l) && l.split(/\s+/).length >= 4).length > 0) return null;
+  if (SQL_START.test(bare)) return 'sql';
+  const shellLines = lines.filter((l) => SHELL_LINE.test(l)).length;
+  if (shellLines / lines.length >= 0.6) return /\bsqlplus\b[^\n]*<</.test(text) ? 'mixed' : 'shell';
+  return null;
 }
 
 const platformOf = (t: ScriptType): Platform => (t === 'shell' || t === 'mixed' ? 'shell-python' : 'plsql');
@@ -118,9 +156,10 @@ function engineOptions(deps: Deps, limits: RunLimits): EngineOptions {
  * Intake: size limit, classification, sanitization, splitting. The raw input lives in
  * this call only. If the sanitizer throws the run stops here: no provider call is made.
  */
-export async function intake(rawSource: string, selected: SelectableType, options: { generateConfig: boolean; maxRepairAttempts?: number }, deps: Deps, limits: RunLimits): Promise<RunRecord> {
+export async function intake(pasted: string, selected: SelectableType, options: { generateConfig: boolean; maxRepairAttempts?: number }, deps: Deps, limits: RunLimits): Promise<RunRecord> {
   limits.onProgress?.({ type: 'stage', stage: 'intake', unitId: null, status: 'start' });
   const t0 = Date.now();
+  const rawSource = stripDosEof(pasted);
   const clock = spanClock();
   // input guardrails: size, type, sanitizer. A rejection is logged by code (never by content).
   const reject = (code: IssueCode, message: string, status: number): never => {
@@ -132,7 +171,7 @@ export async function intake(rawSource: string, selected: SelectableType, option
     reject(Codes.INPUT_TOO_LARGE, `The script is larger than the limit (${Math.round(getConfigInt('MAX_INPUT_BYTES') / 1024)} KB or ${getConfigInt('MAX_INPUT_LINES')} lines).`, 413);
   }
   const c = classify(rawSource, selected);
-  if (c.type === 'unsupported') reject(Codes.INPUT_UNSUPPORTED_TYPE, `${c.reason ?? 'This input type is not supported.'} This tool converts SQL, PL/SQL, SQL*Plus and shell scripts. Convert the wrapper script that launches the program instead.`, 422);
+  if (c.type === 'unsupported') reject(Codes.INPUT_UNSUPPORTED_TYPE, `${c.reason ?? 'This input type is not supported.'} This tool converts SQL, PL/SQL, SQL*Plus and shell scripts. ${/reads like plain text/.test(c.reason ?? '') && selected === 'auto' ? 'If this is a script, choose its type under "Script type" and convert again.' : 'Convert the wrapper script that launches the program instead.'}`, 422);
   const platform = platformOf(c.type);
   let s: ReturnType<typeof sanitize>;
   try {

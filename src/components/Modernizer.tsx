@@ -402,6 +402,11 @@ export function Modernizer() {
                     </option>
                   ))}
                 </select>
+                {run ? (
+                  <span className="quiet detected" data-testid="detected-type">
+                    {scriptType === 'auto' ? 'Detected' : 'Converted as'}: <b>{TYPES.find((t) => t.value === run.scriptType)?.label ?? run.scriptType}</b>
+                  </span>
+                ) : null}
               </div>
               <label className="check">
                 <input type="checkbox" checked={generateConfig} onChange={(e) => setGenerateConfig(e.target.checked)} />

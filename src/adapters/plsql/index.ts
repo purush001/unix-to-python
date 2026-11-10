@@ -16,6 +16,7 @@ const BUILTIN_RULE_IDS: Record<string, string> = {
   'plsql-error-capture': 'standard capture block and RAISE added to the outermost WHEN OTHERS handler',
   'plsql-error-capture-existing-handler': 'standard capture block added to a handler the source already had',
   'sqlplus-serveroutput': 'SET SERVEROUTPUT ON SIZE UNLIMITED added before the first statement',
+  'sql-terminator': 'missing ";" or "/" terminator added so SQL*Plus runs the statement',
   'perf-set-based': 'row-by-row loop replaced by set-based SQL, or BULK COLLECT with LIMIT and FORALL',
   'perf-bind-variables': 'concatenated literals in dynamic SQL replaced by bind variables',
   'perf-predicate': 'sargable predicate, join, analytic function, MERGE or EXISTS in place of a slower form',

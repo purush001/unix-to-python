@@ -102,6 +102,11 @@ export function mockConvertSql(source: string, opts: { embedded: boolean; note?:
         }
       }
     }
+    // a single SQL statement pasted without its ";" would never run in SQL*Plus: add the terminator
+    if (s.kind === 'sql' && !s.terminated && text.trim() && (text.match(/^\s*(select|insert|update|delete|merge|create|alter|drop|truncate|grant|revoke|with)\b/gim) ?? []).length === 1) {
+      text = text.replace(/\s*$/, ';');
+      changes.push({ ruleId: 'sql-terminator', lines: String(s.endLine ?? s.startLine), summary: 'Missing ";" added at the end of the statement', reason: 'SQL*Plus runs a statement only when it is terminated; the source had no terminator.', risk: 'low' });
+    }
     if (s.kind === 'sql' || s.kind === 'plsql') {
       const before = text;
       text = text.replace(/\bDBMS_XSLPROCESSOR\s*\.\s*CLOB2FILE\b/gi, 'DBMS_LOB.CLOB2FILE');

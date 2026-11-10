@@ -16,6 +16,8 @@ test('edit the target by hand, then remove and restore a change and a warning', 
   await page.getByRole('button', { name: 'PL/SQL cursor loop' }).click();
   await page.getByTestId('convert').click();
   await expect(page.getByTestId('draft-version')).toHaveText('version 1 of 1');
+  // auto-detect says what it decided
+  await expect(page.getByTestId('detected-type')).toContainText('Detected:');
 
   // the target is read-only until Edit is pressed
   const target = page.getByTestId('target-editor');
