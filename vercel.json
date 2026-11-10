@@ -1,0 +1,23 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "framework": "nextjs",
+  "regions": ["iad1"],
+  "functions": {
+    "src/app/api/convert/route.ts": { "maxDuration": 300 },
+    "src/app/api/runs/[id]/revise/route.ts": { "maxDuration": 300 },
+    "src/app/api/runs/[id]/resume/route.ts": { "maxDuration": 300 },
+    "src/app/api/cron/learn/route.ts": { "maxDuration": 300 },
+    "src/app/api/runs/[id]/approve/route.ts": { "maxDuration": 60 },
+    "src/app/api/cron/cleanup/route.ts": { "maxDuration": 60 }
+  },
+  "crons": [
+    { "path": "/api/cron/learn", "schedule": "17 3 * * *" },
+    { "path": "/api/cron/cleanup", "schedule": "47 4 * * *" }
+  ],
+  "git": {
+    "deploymentEnabled": {
+      "conversions-data": false
+    }
+  },
+  "ignoreCommand": "bash scripts/vercel-ignore-build.sh"
+}
