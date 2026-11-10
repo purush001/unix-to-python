@@ -383,6 +383,9 @@ vercel build && vercel deploy --prebuilt     # preview deployment
   move to a "Removed from view" list and can be restored. Nothing is deleted: they stay in the
   stored draft and are marked as removed in the saved `report.md`. An error cannot be removed; it
   has to be fixed. After approval the lists are a fixed record.
+- **Change the output from the feedback panel.** Each entry has two actions. "Change output" opens
+  the target editor at that entry's line so you can fix it yourself. "Ask for a fix" requests a
+  new draft with a note built from the entry (its code, line, message and next step).
 - **Request changes** sends a note to the model and produces a new draft, as before.
 
 ## Human approval and GitHub

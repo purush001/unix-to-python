@@ -13,6 +13,12 @@ interface Props {
   dismissed: number[];
   canDismiss: boolean;
   onDismiss: (index: number, dismissed: boolean) => void;
+  /** True while the output can still be changed (latest version of an unapproved draft). */
+  canChange: boolean;
+  /** Opens the target editor at this entry's line so the person can change the output by hand. */
+  onEdit: (issue: IssueView, index: number) => void;
+  /** Asks the converter for a new draft that fixes this entry. */
+  onFix: (issue: IssueView) => void;
 }
 
 function where(i: IssueView): string {
@@ -20,7 +26,7 @@ function where(i: IssueView): string {
   return 'whole script';
 }
 
-function IssueItem({ issue, index, active, onSelect, onReport, onRemove }: { issue: IssueView; index: number; active: boolean; onSelect: Props['onSelect']; onReport: Props['onReport']; onRemove: (() => void) | null }) {
+function IssueItem({ issue, index, active, onSelect, onReport, onRemove, onEdit, onFix }: { issue: IssueView; index: number; active: boolean; onSelect: Props['onSelect']; onReport: Props['onReport']; onRemove: (() => void) | null; onEdit: (() => void) | null; onFix: (() => void) | null }) {
   const id = useId();
   const [open, setOpen] = useState(false);
   const [comment, setComment] = useState('');
@@ -76,6 +82,16 @@ function IssueItem({ issue, index, active, onSelect, onReport, onRemove }: { iss
         <dd>{issue.nextStep}</dd>
       </dl>
       <div className="issue-actions">
+        {onEdit ? (
+          <button type="button" className="btn btn-small btn-primary" onClick={onEdit} data-testid="issue-edit">
+            <span aria-hidden="true">✎ </span>Change output<span className="sr-only"> for this {issue.severity}: edit the target at {where(issue)}</span>
+          </button>
+        ) : null}
+        {onFix ? (
+          <button type="button" className="btn btn-small btn-ghost" onClick={onFix} data-testid="issue-fix">
+            Ask for a fix<span className="sr-only"> of this {issue.severity} in a new draft</span>
+          </button>
+        ) : null}
         {state === 'sent' ? (
           <p className="msg msg-ok" role="status">
             <span aria-hidden="true">✓ </span>Problem reported. Thank you.
@@ -118,7 +134,7 @@ function IssueItem({ issue, index, active, onSelect, onReport, onRemove }: { iss
 }
 
 /** Every issue of the current draft, in plain language, each one a jump target. */
-export function FeedbackPanel({ issues, activeIndex, onSelect, onReport, dismissed, canDismiss, onDismiss }: Props) {
+export function FeedbackPanel({ issues, activeIndex, onSelect, onReport, dismissed, canDismiss, onDismiss, canChange, onEdit, onFix }: Props) {
   const all = issues.map((i, n) => ({ i, n }));
   const shown = all.filter((x) => !dismissed.includes(x.n));
   const hidden = all.filter((x) => dismissed.includes(x.n));
@@ -133,7 +149,10 @@ export function FeedbackPanel({ issues, activeIndex, onSelect, onReport, dismiss
         </p>
       ) : (
         <>
-          <p className="quiet">Select an entry to jump to its line in the target script. Lines traced back to the source are marked there too.</p>
+          <p className="quiet">
+            Select an entry to jump to its line in the target script. Lines traced back to the source are marked there too.
+            {canChange ? ' Use "Change output" to edit the target at that line yourself, or "Ask for a fix" to get a new draft.' : ''}
+          </p>
           {shown.length === 0 ? <p className="quiet">Every warning was removed from view.</p> : null}
           <ol className="issues" data-testid="issue-list">
             {shown.map(({ i, n }) => (
@@ -146,6 +165,8 @@ export function FeedbackPanel({ issues, activeIndex, onSelect, onReport, dismiss
                 onReport={onReport}
                 // an error can never be removed: it has to be fixed
                 onRemove={canDismiss && i.severity !== 'error' ? () => onDismiss(n, true) : null}
+                onEdit={canChange ? () => onEdit(i, n) : null}
+                onFix={canChange ? () => onFix(i) : null}
               />
             ))}
           </ol>

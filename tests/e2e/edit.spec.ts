@@ -59,5 +59,18 @@ test('edit the target by hand, then remove and restore a change and a warning', 
   await expect(page.getByTestId('draft-version')).toHaveText('version 2 of 2');
   await expect(page.getByTestId('issue-item')).toHaveCount(issueCount - 1);
 
+  // "Change output" on a feedback entry opens the target for editing at that entry
+  await page.getByTestId('issue-edit').first().click();
+  await expect(target).toHaveAttribute('data-readonly', 'false');
+  await expect(page.getByTestId('edit-bar')).toBeVisible();
+  await page.getByTestId('edit-cancel').click();
+  await expect(target).toHaveAttribute('data-readonly', 'true');
+
+  // "Ask for a fix" requests a new draft with a note built from the entry
+  const code = (await page.getByTestId('issue-item').first().locator('code').first().textContent()) ?? '';
+  await page.getByTestId('issue-fix').first().click();
+  await expect(page.getByTestId('draft-version')).toHaveText('version 3 of 3');
+  await expect(page.locator('.target-note')).toContainText(`Fix ${code}`);
+
   expect(problems).toEqual([]);
 });

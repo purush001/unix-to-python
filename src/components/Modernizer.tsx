@@ -219,6 +219,19 @@ export function Modernizer() {
     void drive('revising', token, () => api.revise(token, run.id, text, onStage));
   };
 
+  /** From the feedback panel: a new draft that fixes one entry. Uses the same path as "Request changes". */
+  const fixIssue = (issue: IssueView) => {
+    if (!token || !run || busy) return;
+    const place = issue.line !== null ? ` at line ${issue.line}${issue.file ? ` of ${issue.file}` : ''}` : issue.sourceLine ? ` (source line ${issue.sourceLine})` : '';
+    const text = `Fix ${issue.code}${place}: ${issue.message} ${issue.nextStep}`.slice(0, 1900);
+    repairSeen.current = false;
+    setStages({ ...emptyStages(), intake: 'done' });
+    setNoteOpen(false);
+    setEditText(null);
+    setShowDiff(false);
+    void drive('revising', token, () => api.revise(token, run.id, text, onStage));
+  };
+
   const approve = async () => {
     if (!token || !run || busy) return;
     setBusy('approving');
@@ -304,6 +317,18 @@ export function Modernizer() {
   const diffBefore = run && draft ? (diffBase === 'source' ? run.sanitizedSource : (run.drafts.find((d) => d.version === diffBase)?.files[0]?.content ?? run.sanitizedSource)) : '';
   const diffBeforeIsSource = diffBase === 'source' || !run?.drafts.some((d) => d.version === diffBase);
   const phase = busy === 'converting' ? 'loading' : busy === 'revising' ? 'revising' : saved ? 'final' : saveFailed ? 'save-failed' : error && !draft ? 'error' : draft ? 'draft' : 'empty';
+
+  /** From the feedback panel: open the target for editing at the entry's line. */
+  const editFromIssue = (issue: IssueView, index: number) => {
+    if (!draft) return;
+    selectIssue(issue, index);
+    const name = issue.file && draft.files.some((f) => f.name === issue.file) ? issue.file : (draft.files[0]?.name ?? '');
+    const target = draft.files.find((f) => f.name === name);
+    if (target && target.kind !== 'runtime') {
+      setEditText(target.content);
+      setAnnouncement(`Editing ${name}${issue.line !== null ? ` at line ${issue.line}` : ''}. Save it as a new version when you are done.`);
+    }
+  };
 
   const selectIssue = (issue: IssueView, index: number) => {
     if (!draft) return;
@@ -669,7 +694,7 @@ export function Modernizer() {
                 <ReviewPanel run={run} draft={draft} canDismiss={canDismiss} onDismiss={(kind, index, on) => void dismiss(kind, index, on)} />
                 <div className="review-stack">
                   {saved || saveFailed ? <RatingPanel existing={run.rating} onRate={(b) => sendFeedback(b, true)} /> : null}
-                  <FeedbackPanel key={`${run.id}-${draft.version}`} issues={draft.issues} activeIndex={activeIssue} onSelect={selectIssue} onReport={(b) => sendFeedback(b, false)} dismissed={draft.dismissed.issues} canDismiss={canDismiss} onDismiss={(index, on) => void dismiss('issue', index, on)} />
+                  <FeedbackPanel key={`${run.id}-${draft.version}`} issues={draft.issues} activeIndex={activeIssue} onSelect={selectIssue} onReport={(b) => sendFeedback(b, false)} dismissed={draft.dismissed.issues} canDismiss={canDismiss} onDismiss={(index, on) => void dismiss('issue', index, on)} canChange={canAct && viewingLatest} onEdit={editFromIssue} onFix={fixIssue} />
                   {run.reviewerNotes.length > 0 ? (
                     <section className="panel" aria-labelledby="notes-h">
                       <h3 id="notes-h" className="panel-title">
