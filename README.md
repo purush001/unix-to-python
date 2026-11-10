@@ -170,7 +170,15 @@ unless it is on the deny-list. A bare user ID cannot be tied to a full name, so 
 
 ## Standard for generated Python
 
-Every generated script carries the same runtime (`src/adapters/shell-python/runtime.ts`):
+Every generated script uses the same runtime, delivered as **one shared file, `script_runtime.py`**,
+next to the script (`src/adapters/shell-python/runtime.ts` holds its text). The script itself is
+short: a docstring, its imports, `parse_args`, `job`, and a three-line `main` that calls
+`run_main(job, parse_args, argv)`. For the eval fixtures that is 50 to 110 lines, where the earlier
+self-contained form was 340 to 520. Deploy `script_runtime.py` in the same directory as the scripts;
+it is identical for every conversion, is written by the application and never by the model, and
+loads without `oracledb` or `paramiko` unless a script uses the database or SSH helpers.
+
+What the runtime provides:
 
 - Module docstring (purpose, origin, arguments, exit codes, original schedule); `main()` returns the
   exit code; ends with `if __name__ == "__main__": sys.exit(main())`.
@@ -207,6 +215,8 @@ function: authenticate → validate (zod) → load state from storage → work �
 | `POST /api/convert` `{ source, scriptType?, options: { generateConfig } }` | Run result with the draft |
 | `POST /api/runs/:id/revise` `{ note }` | New draft using the reviewer's note |
 | `POST /api/runs/:id/resume` | Continue a cut-off run (addition to the spec) |
+| `POST /api/runs/:id/edit` `{ file, content, note? }` | Save a hand edit of the latest draft as a new draft version. It passes the output guardrails and the code validators; no model is called |
+| `POST /api/runs/:id/dismiss` `{ version, kind, index, dismissed }` | Remove a change-list item or a warning from view, or restore it. Nothing is deleted; an error cannot be removed |
 | `POST /api/runs/:id/approve` | Mark final, save to GitHub; call again to retry a failed save |
 | `POST /api/runs/:id/feedback` `{ rating?, comment?, errorCode?, line? }` | Rating or problem report |
 | `GET /api/runs/:id` | Stored state (page recovery) |
@@ -362,11 +372,24 @@ vercel build && vercel deploy --prebuilt     # preview deployment
    are passed to the agent and recorded in the witness. If Chroma is unreachable the conversion
    continues with the base rules and warning `MEMORY_UNAVAILABLE`.
 
+## Reviewing a draft
+
+- **Edit the target.** "Edit" under the target editor makes the file editable. "Save as version N"
+  stores the edit as a new draft version and keeps the earlier one. The edit goes through the same
+  output guardrails as model output (hosts, names and secrets are replaced and reported) and the
+  same code validators. No model is called, so the independent review does not run on a hand edit;
+  the new version carries the warning `DRAFT_EDITED_BY_REVIEWER`. `script_runtime.py` cannot be edited.
+- **Remove from view.** Each change-list item and each warning has a "Remove" button. Removed items
+  move to a "Removed from view" list and can be restored. Nothing is deleted: they stay in the
+  stored draft and are marked as removed in the saved `report.md`. An error cannot be removed; it
+  has to be fixed. After approval the lists are a fixed record.
+- **Request changes** sends a note to the model and produces a new draft, as before.
+
 ## Human approval and GitHub
 
 On approval the app commits to `conversions/<YYYY-MM-DD>-<runId>/` on the data branch:
 `source.sanitized.<ext>`, `target.<ext>`, `config.ini.template` and `requirements.txt` when
-generated, `witness.json`, `report.md`. Every file is scanned again immediately before the commit;
+generated, `script_runtime.py` for Python output, `witness.json`, `report.md`. Every file is scanned again immediately before the commit;
 any hit aborts it. If the save fails the run stays approved with the save pending, the error is
 shown with a Retry button, and the final output is not lost. No pull request is opened.
 
@@ -492,6 +515,7 @@ All codes are defined once in `src/pipeline/issue-codes.ts`. Code compares codes
 | `REVIEW_UNAVAILABLE` | warning | The independent review could not be completed. | Review the diff by hand with extra care before approving. |
 | `CONVERT_UNKNOWN` | warning | The converter could not convert part of the script with certainty, so it left that part as it was and said what is missing. | Read the message, supply the missing information in a "request changes" note, or convert that part by hand. |
 | `CHANGE_RULE_UNKNOWN` | error | The change list cites a rule ID that was neither supplied to the model nor built in, so the stated reason for a change cannot be traced. | Request changes, or check the change by hand: its rule ID was invented. |
+| `DRAFT_EDITED_BY_REVIEWER` | warning | This version was edited by hand in the target editor. The code checks ran on the edit; the independent review did not. | Read the diff against the previous version before approving. Use "Request changes" if you want the reviewer step to run again. |
 | `RUN_TOKEN_BUDGET_REACHED` | warning | The run reached its token budget, so no further model calls were made for it. | Review the draft and its remaining issues by hand, or split the script and convert the parts. |
 | `REPAIR_NO_PROGRESS` | warning | An automatic repair attempt did not change the set of errors, so repairing stopped early. | Fix the remaining errors by hand or request changes with a note. |
 | `REPAIR_FAILED_KEPT_DRAFT` | warning | A repair call failed. The last usable draft was kept. | Review the remaining errors; convert again later if the provider was unavailable. |
@@ -556,6 +580,9 @@ every standard is in `docs/audit/01-gap-report.md`; the release verdict is `docs
 - **Documentation checks.** Oracle facts were read on docs.oracle.com. Claude API facts were checked
   against the reference bundled with the coding agent, not the vendor pages. Vercel, Supabase,
   Chroma and Voyage facts came from package sources and search summaries.
+- **Shared Python runtime.** A converted Python script needs `script_runtime.py` beside it. Conversions
+  saved before this change are self-contained and still verify.
+- **Hand edits are not reviewed by the model.** The code checks run on an edit; the reviewer step does not.
 - **Mock converter scope** — see "Switching from mocks to real providers".
 - **SQL parse check** is a structure check (quotes, comments, parentheses, blocks, terminators), the
   minimum the specification allows; it is not a full Oracle grammar.

@@ -9,6 +9,10 @@ interface Props {
   activeIndex: number | null;
   onSelect: (issue: IssueView, index: number) => void;
   onReport: (body: FeedbackBody) => Promise<void>;
+  /** Indexes of warnings the reviewer removed from view. */
+  dismissed: number[];
+  canDismiss: boolean;
+  onDismiss: (index: number, dismissed: boolean) => void;
 }
 
 function where(i: IssueView): string {
@@ -16,7 +20,7 @@ function where(i: IssueView): string {
   return 'whole script';
 }
 
-function IssueItem({ issue, index, active, onSelect, onReport }: { issue: IssueView; index: number; active: boolean; onSelect: Props['onSelect']; onReport: Props['onReport'] }) {
+function IssueItem({ issue, index, active, onSelect, onReport, onRemove }: { issue: IssueView; index: number; active: boolean; onSelect: Props['onSelect']; onReport: Props['onReport']; onRemove: (() => void) | null }) {
   const id = useId();
   const [open, setOpen] = useState(false);
   const [comment, setComment] = useState('');
@@ -81,6 +85,11 @@ function IssueItem({ issue, index, active, onSelect, onReport }: { issue: IssueV
             Report a problem
           </button>
         )}
+        {onRemove ? (
+          <button type="button" className="btn btn-small btn-ghost" onClick={onRemove} data-testid="issue-remove">
+            Remove<span className="sr-only"> this {issue.severity} from the list</span>
+          </button>
+        ) : null}
       </div>
       {open ? (
         <form id={`${id}-f`} className="report-form" onSubmit={submit}>
@@ -109,11 +118,14 @@ function IssueItem({ issue, index, active, onSelect, onReport }: { issue: IssueV
 }
 
 /** Every issue of the current draft, in plain language, each one a jump target. */
-export function FeedbackPanel({ issues, activeIndex, onSelect, onReport }: Props) {
+export function FeedbackPanel({ issues, activeIndex, onSelect, onReport, dismissed, canDismiss, onDismiss }: Props) {
+  const all = issues.map((i, n) => ({ i, n }));
+  const shown = all.filter((x) => !dismissed.includes(x.n));
+  const hidden = all.filter((x) => dismissed.includes(x.n));
   return (
     <section className="panel feedback" aria-labelledby="feedback-h">
       <h3 id="feedback-h" className="panel-title">
-        Feedback panel <span className="count">{issues.length}</span>
+        Feedback panel <span className="count">{shown.length}</span>
       </h3>
       {issues.length === 0 ? (
         <p className="quiet" data-testid="no-issues">
@@ -122,11 +134,42 @@ export function FeedbackPanel({ issues, activeIndex, onSelect, onReport }: Props
       ) : (
         <>
           <p className="quiet">Select an entry to jump to its line in the target script. Lines traced back to the source are marked there too.</p>
+          {shown.length === 0 ? <p className="quiet">Every warning was removed from view.</p> : null}
           <ol className="issues" data-testid="issue-list">
-            {issues.map((i, n) => (
-              <IssueItem key={`${i.code}-${i.line ?? 'w'}-${i.sourceLine ?? 's'}-${n}`} issue={i} index={n} active={activeIndex === n} onSelect={onSelect} onReport={onReport} />
+            {shown.map(({ i, n }) => (
+              <IssueItem
+                key={`${i.code}-${i.line ?? 'w'}-${i.sourceLine ?? 's'}-${n}`}
+                issue={i}
+                index={n}
+                active={activeIndex === n}
+                onSelect={onSelect}
+                onReport={onReport}
+                // an error can never be removed: it has to be fixed
+                onRemove={canDismiss && i.severity !== 'error' ? () => onDismiss(n, true) : null}
+              />
             ))}
           </ol>
+          {hidden.length > 0 ? (
+            <details className="removed" data-testid="issues-removed">
+              <summary>
+                Removed from view <span className="count">{hidden.length}</span>
+              </summary>
+              <p className="quiet">These stay in the record and in the saved report, marked as removed.</p>
+              <ul className="removed-list">
+                {hidden.map(({ i, n }) => (
+                  <li key={`${i.code}-${n}`}>
+                    <code className="rule">{i.code}</code>
+                    <span>{i.message}</span>
+                    {canDismiss ? (
+                      <button type="button" className="btn btn-small btn-ghost" onClick={() => onDismiss(n, false)} data-testid="issue-restore">
+                        Restore<span className="sr-only"> {i.code}</span>
+                      </button>
+                    ) : null}
+                  </li>
+                ))}
+              </ul>
+            </details>
+          ) : null}
         </>
       )}
     </section>

@@ -28,7 +28,7 @@ export function languageExtension(lang: EditorLanguage): Extension {
 
 export function languageForFile(file: Pick<OutputFile, 'kind'>): EditorLanguage {
   if (file.kind === 'sql') return 'sql';
-  if (file.kind === 'python') return 'python';
+  if (file.kind === 'python' || file.kind === 'runtime') return 'python';
   return 'ini';
 }
 

@@ -1085,6 +1085,20 @@ textarea {
   height: auto;
 }
 
+/* editing the target by hand */
+.pane-edit {
+  display: grid;
+  gap: 4px;
+  margin-top: 14px;
+}
+.pane-edit .pane-note {
+  margin-top: 6px;
+}
+.pane-out:has(.pane-edit) .pane-body {
+  outline: 3px solid var(--glow);
+  outline-offset: 1px;
+}
+
 /* ---------- decide ---------- */
 .decide {
   display: grid;
@@ -1289,6 +1303,51 @@ textarea {
   font-family: var(--serif);
   font-size: 1.05rem;
   color: var(--brand);
+}
+
+/* items the reviewer removed from view (kept in the record) */
+.item-remove {
+  min-height: 26px;
+  padding: 1px 9px;
+  font-size: 0.78rem;
+}
+.removed {
+  margin-top: 12px;
+  padding: 10px 12px;
+  border: 1px dashed var(--line);
+  border-radius: var(--r-md);
+  background: var(--bg);
+}
+.removed summary {
+  cursor: pointer;
+  font-weight: 700;
+  font-size: 0.9rem;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.removed-list {
+  display: grid;
+  gap: 8px;
+  margin-top: 8px;
+}
+.removed-list li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+  font-size: 0.9rem;
+  color: var(--muted);
+}
+.removed-list li span {
+  flex: 1 1 200px;
+  min-width: 0;
+}
+.issue-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
 }
 
 /* ---------- feedback panel ---------- */

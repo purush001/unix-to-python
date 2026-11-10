@@ -16,7 +16,7 @@ import { StatusPanel } from './StatusPanel';
 import { TargetBar } from './TargetBar';
 import { TokenGate } from './TokenGate';
 
-type Busy = null | 'restoring' | 'converting' | 'revising' | 'approving';
+type Busy = null | 'restoring' | 'converting' | 'revising' | 'approving' | 'saving-edit';
 
 const TYPES: { value: SelectableType; label: string }[] = [
   { value: 'auto', label: 'Auto-detect' },
@@ -40,6 +40,8 @@ export function Modernizer() {
 
   const [run, setRun] = useState<RunView | null>(null);
   const [busy, setBusy] = useState<Busy>(null);
+  /** Text of the target file while a person is editing it; null when not editing. */
+  const [editText, setEditText] = useState<string | null>(null);
   const [error, setError] = useState<ApiErrorInfo | null>(null);
   const [stages, setStages] = useState<StageMap>(emptyStages);
   const [unit, setUnit] = useState<string | null>(null);
@@ -232,6 +234,36 @@ export function Modernizer() {
     }
   };
 
+  /** Saves a hand edit of the target file as a new draft version. */
+  const saveEdit = async (name: string) => {
+    if (!token || !run || busy || editText === null) return;
+    setBusy('saving-edit');
+    setError(null);
+    try {
+      const r = await api.edit(token, run.id, { file: name, content: editText });
+      adopt(r);
+      setFileName(name);
+      setEditText(null);
+      const d = latestDraft(r);
+      setAnnouncement(d ? `Your edit was saved as draft version ${d.version}. Status: ${STATUS_TEXT[d.status]}.` : 'Your edit was saved.');
+    } catch (e) {
+      fail(e);
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  /** Removes a change-list item or a warning from view, or restores it. Nothing is deleted from the record. */
+  const dismiss = async (kind: 'change' | 'issue', index: number, dismissed: boolean) => {
+    if (!token || !run || !draft) return;
+    try {
+      setRun(await api.dismiss(token, run.id, { version: draft.version, kind, index, dismissed }));
+      setAnnouncement(dismissed ? 'Removed from view. It stays in the record and can be restored.' : 'Restored.');
+    } catch (e) {
+      fail(e);
+    }
+  };
+
   const sendFeedback = useCallback(
     async (body: FeedbackBody, adoptResult: boolean) => {
       if (!token || !run) return;
@@ -266,6 +298,8 @@ export function Modernizer() {
   const saveFailed = run?.state === 'approved';
   const canAct = run?.state === 'draft_ready' && !busy;
   const viewingLatest = draft !== null && latest !== null && draft.version === latest.version;
+  const canEdit = canAct && viewingLatest && !!file && file.kind !== 'runtime';
+  const canDismiss = !!run && !busy && run.final === null && (run.state === 'draft_ready' || run.state === 'changes_requested');
   const sourceLang = run && sourceIsSanitized ? sourceLanguageOf(run) : languageForSource(scriptType, source);
   const diffBefore = run && draft ? (diffBase === 'source' ? run.sanitizedSource : (run.drafts.find((d) => d.version === diffBase)?.files[0]?.content ?? run.sanitizedSource)) : '';
   const diffBeforeIsSource = diffBase === 'source' || !run?.drafts.some((d) => d.version === diffBase);
@@ -445,13 +479,20 @@ export function Modernizer() {
                 showDiff={showDiff}
                 diffBase={diffBase}
                 onVersion={(v) => {
+                  setEditText(null);
                   setVersion(v);
                   setActiveIssue(null);
                   setTargetJump(null);
                   if (diffBase === v) setDiffBase('source');
                 }}
-                onFile={setFileName}
-                onToggleDiff={() => setShowDiff((s) => !s)}
+                onFile={(name) => {
+                  setEditText(null);
+                  setFileName(name);
+                }}
+                onToggleDiff={() => {
+                  setEditText(null);
+                  setShowDiff((s) => !s);
+                }}
                 onDiffBase={setDiffBase}
                 onCopy={() => void copyText(file.content).then((ok) => setToast(ok ? `Copied ${file.name} to the clipboard.` : 'Copying is blocked by the browser. Use Download instead.'))}
                 onDownload={() => {
@@ -531,11 +572,12 @@ export function Modernizer() {
                   </div>
                   <div className="pane-body">
                     <CodeEditor
-                      value={file?.content ?? ''}
-                      readOnly
+                      value={editText ?? file?.content ?? ''}
+                      onChange={editText !== null ? setEditText : undefined}
+                      readOnly={editText === null}
                       language={file ? languageForFile(file) : 'text'}
                       tone="ink"
-                      label={file ? `Target script, ${file.name}, read only` : 'Target script, empty'}
+                      label={file ? `Target script, ${file.name}, ${editText !== null ? 'editing' : 'read only'}` : 'Target script, empty'}
                       jump={targetJump && file && draft && targetJump.file === file.name && targetJump.version === draft.version ? targetJump : null}
                       testId="target-editor"
                     />
@@ -545,7 +587,42 @@ export function Modernizer() {
                       </p>
                     ) : null}
                   </div>
-                  <p className="pane-note">{file ? (saved ? 'Final output, as committed.' : 'Read-only. Review it, then approve or request changes below.') : 'Nothing is saved until you approve.'}</p>
+                  {file && editText !== null ? (
+                    <div className="pane-edit" data-testid="edit-bar">
+                      <div className="row">
+                        <button type="button" className="btn btn-primary" onClick={() => void saveEdit(file.name)} disabled={busy !== null || editText === file.content || !editText.trim()} data-testid="edit-save">
+                          {busy === 'saving-edit' ? 'Saving…' : `Save as version ${(latest?.version ?? 0) + 1}`}
+                        </button>
+                        <button type="button" className="btn btn-ghost" onClick={() => setEditText(null)} disabled={busy !== null} data-testid="edit-cancel">
+                          Cancel
+                        </button>
+                      </div>
+                      <p className="pane-note">
+                        You are editing {file.name}. Saving runs the same checks as a converted draft and keeps version {draft?.version} unchanged. Hosts, names and secrets you type are replaced before anything is stored.
+                      </p>
+                    </div>
+                  ) : (
+                    <p className="pane-note">
+                      {file ? (
+                        saved ? (
+                          'Final output, as committed.'
+                        ) : canEdit ? (
+                          <>
+                            <button type="button" className="btn btn-small btn-ghost" onClick={() => setEditText(file.content)} data-testid="edit-target">
+                              <span aria-hidden="true">✎ </span>Edit {file.name}
+                            </button>{' '}
+                            Review it, then approve, edit it yourself, or request changes below.
+                          </>
+                        ) : file.kind === 'runtime' ? (
+                          'The shared runtime is the same for every script and cannot be edited here. Deploy it next to the script.'
+                        ) : (
+                          'Read-only. Review it, then approve or request changes below.'
+                        )
+                      ) : (
+                        'Nothing is saved until you approve.'
+                      )}
+                    </p>
+                  )}
                 </div>
               </div>
             )}
@@ -589,10 +666,10 @@ export function Modernizer() {
                 <span className="quiet" data-testid="run-id">Run ID <code>{run.id}</code> (quote it when you report a problem)</span>
               </h2>
               <div className="review-grid">
-                <ReviewPanel run={run} draft={draft} />
+                <ReviewPanel run={run} draft={draft} canDismiss={canDismiss} onDismiss={(kind, index, on) => void dismiss(kind, index, on)} />
                 <div className="review-stack">
                   {saved || saveFailed ? <RatingPanel existing={run.rating} onRate={(b) => sendFeedback(b, true)} /> : null}
-                  <FeedbackPanel key={`${run.id}-${draft.version}`} issues={draft.issues} activeIndex={activeIssue} onSelect={selectIssue} onReport={(b) => sendFeedback(b, false)} />
+                  <FeedbackPanel key={`${run.id}-${draft.version}`} issues={draft.issues} activeIndex={activeIssue} onSelect={selectIssue} onReport={(b) => sendFeedback(b, false)} dismissed={draft.dismissed.issues} canDismiss={canDismiss} onDismiss={(index, on) => void dismiss('issue', index, on)} />
                   {run.reviewerNotes.length > 0 ? (
                     <section className="panel" aria-labelledby="notes-h">
                       <h3 id="notes-h" className="panel-title">

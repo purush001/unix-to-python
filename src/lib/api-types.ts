@@ -19,6 +19,10 @@ export interface DraftView {
   changes: Change[];
   suggestions: Suggestion[];
   attempts: number;
+  /** Indexes of change-list items and warnings the reviewer removed from view. */
+  dismissed: { changes: number[]; issues: number[] };
+  /** The file a person edited to make this version, if any. */
+  editedFile: string | null;
 }
 export interface RunView {
   id: string;
@@ -108,7 +112,7 @@ export function toRunView(run: RunRecord): RunView {
     id: run.id, state: run.state, resumable: run.state === 'drafting', scriptType: run.scriptType, platform: run.platform, createdAt: run.createdAt, updatedAt: run.updatedAt,
     sanitizedSource: run.sanitizedSource,
     sanitization: { counts: run.sanitization.counts, summary: countSummary(run.sanitization.counts), warnings: run.sanitization.warnings.map(view), highlightLines: run.sanitization.highlightLines },
-    drafts: run.drafts.map((d) => ({ version: d.version, createdAt: d.createdAt, note: d.note, status: d.result.status, files: d.files, issues: d.result.issues.map(view), changes: d.result.changes, suggestions: d.suggestions, attempts: d.result.attempts })),
+    drafts: run.drafts.map((d) => ({ version: d.version, createdAt: d.createdAt, note: d.note, status: d.result.status, files: d.files, issues: d.result.issues.map(view), changes: d.result.changes, suggestions: d.suggestions, attempts: d.result.attempts, dismissed: d.dismissed ?? { changes: [], issues: [] }, editedFile: d.editedFile ?? null })),
     reviewerNotes: run.reviewerNotes, stages: run.stageLog, final: run.final, save: run.save, rating: run.rating, error: run.error,
   };
 }
