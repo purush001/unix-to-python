@@ -15,7 +15,6 @@ export function computeMetrics(runs: RunRecord[], logs: LogEntry[], feedback: Fe
     runsByState[r.state] = (runsByState[r.state] ?? 0) + 1;
     for (const s of r.stageLog) (durations[s.stage] ??= []).push(s.ms);
     if (r.error) failuresByCode[r.error.code] = (failuresByCode[r.error.code] ?? 0) + 1;
-    if (r.save?.status === 'failed') saveFailures++;
     const d = r.drafts[r.drafts.length - 1];
     if (!d) continue;
     if (d.result.attempts > 0) repaired++;
@@ -26,7 +25,8 @@ export function computeMetrics(runs: RunRecord[], logs: LogEntry[], feedback: Fe
   for (const f of feedback) if (f.rating) ratingDistribution[String(f.rating)]++;
   const retrievals = logs.filter((l) => l.msg === 'memory retrieval');
   const num = (v: unknown) => (typeof v === 'number' ? v : 0);
-  saveFailures += logs.filter((l) => l.msg === 'github save failed').length > saveFailures ? 0 : 0;
+  // counted from the log so a later successful retry does not hide the failure
+  saveFailures = Math.max(logs.filter((l) => l.msg === 'github save failed').length, runs.filter((r) => r.save?.status === 'failed').length);
   return {
     runsByState,
     stageDurations: Object.fromEntries(Object.entries(durations).map(([k, v]) => [k, { p50: percentile(v, 50), p95: percentile(v, 95), count: v.length }])),

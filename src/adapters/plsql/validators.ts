@@ -188,8 +188,16 @@ export interface PlsqlValidateInput {
   changes: Change[];
   embedded: boolean;
 }
+/** The agent reports a statement with no form common to both releases through the change list. */
+export function noCommonFormCheck(changes: Change[]): Issue[] {
+  return changes
+    .filter((c) => c.ruleId === Codes.SQL_NO_COMMON_FORM)
+    .map((c) => issue(Codes.SQL_NO_COMMON_FORM, `${c.summary} ${c.reason}`.trim(), /^\d+/.test(c.lines) ? Number.parseInt(c.lines, 10) : null));
+}
+
 export function validatePlsql(v: PlsqlValidateInput): Issue[] {
   return [
+    ...noCommonFormCheck(v.changes),
     ...parseCheck(v.draft),
     ...compatCheck(v.draft),
     ...errorCaptureCheck(v.source, v.draft, v.embedded),

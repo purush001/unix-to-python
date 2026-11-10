@@ -164,6 +164,21 @@ describe('Python validators', () => {
   });
 });
 
+describe('upgrade-sensitive Oracle environment checks', () => {
+  it('flags original Export and SID-based connections on the shell source', async () => {
+    const shell = '#!/bin/sh\nexport ORACLE_SID=HRPRD\nsqlplus -s / as sysdba <<SQL\nSELECT 1 FROM DUAL;\nSQL\nexp userid=sysadm/${DB_PASSWORD} file=x.dmp\n';
+    const issues = await validatePython({ source: shell, draft: mockConvertShell(shell, { generateConfig: false }).python });
+    expect(issues.find((i) => i.code === Codes.SHELL_DESUPPORTED_TOOL)?.sourceLine).toBe(6);
+    expect(issues.find((i) => i.code === Codes.SHELL_ORACLE_ENV_REVIEW)?.sourceLine).toBe(3);
+  });
+
+  it('turns a no-common-form report from the agent into an error for the reviewer', async () => {
+    const { noCommonFormCheck } = await import('@/adapters/plsql/validators');
+    const out = noCommonFormCheck([{ ruleId: 'SQL_NO_COMMON_FORM', lines: '12', summary: 'Kept the 19c form.', reason: '19c: X. 26ai: Y.', risk: 'high' }]);
+    expect(out.map((i) => [i.code, i.severity, i.line])).toEqual([[Codes.SQL_NO_COMMON_FORM, 'error', 12]]);
+  });
+});
+
 describe('classification', () => {
   it('detects the script type and honours the selector', () => {
     expect(classify('SELECT 1 FROM DUAL;').type).toBe('sql');

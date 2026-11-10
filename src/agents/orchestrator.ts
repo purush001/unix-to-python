@@ -1,6 +1,6 @@
 import { ADAPTERS } from '@/adapters';
 import { hasPlsql, hasSqlplus, splitScript } from '@/adapters/plsql/splitter';
-import { embeddedSql, parseShell, walk } from '@/adapters/shell-python/shell-parser';
+import { embeddedSql } from '@/adapters/shell-python/shell-parser';
 import { PYTHON_SYNTAX_CHECKER } from '@/adapters/shell-python/validators';
 import { getConfigInt } from '@/config/env';
 import { AppError } from '@/lib/errors';
@@ -254,12 +254,4 @@ export function beginRevision(run: RunRecord, rawNote: string): void {
   run.pendingNote = note;
   run.units = splitUnits(run.sanitizedSource, run.scriptType);
   run.updatedAt = nowIso();
-}
-
-export function hasShellConstruct(text: string, name: string): boolean {
-  let found = false;
-  walk(parseShell(text), (n) => {
-    if (n.type === 'simple' && n.words[0] === name) found = true;
-  });
-  return found;
 }

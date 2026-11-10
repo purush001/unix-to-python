@@ -149,6 +149,14 @@ export async function validatePython(v: PyValidateInput): Promise<Issue[]> {
     if (codeN !== 0 && !f.intLiteralsInExits.has(codeN)) out.push(issue(Codes.PY_EXIT_CODE_CHANGED, `The shell script exits with ${codeN} (line ${srcLine}); the Python script never returns ${codeN}.`, null, { sourceLine: srcLine }));
   }
 
+  // Oracle environment assumptions that change with the upgrade (checked on the shell source).
+  const srcLines = v.source.split('\n');
+  const lineWhere = (re: RegExp) => srcLines.findIndex((l) => re.test(l) && !/^\s*#/.test(l)) + 1;
+  const expLine = lineWhere(/(^|[\s;|&(`])exp\s+\S*(userid=|\w+\/)/);
+  if (expLine) out.push(issue(Codes.SHELL_DESUPPORTED_TOOL, 'Original Export (exp) is desupported in 26ai. Use Data Pump (expdp), which exists on 19c and 26ai.', null, { sourceLine: expLine }));
+  const sidLine = lineWhere(/\bsqlplus\b[^\n]*\s\/\s+as\s+sys(dba|oper)\b|\bsqlplus\b[^\n]*\s["']?\/\s+as\s+sys/i) || (/\bORACLE_SID=|\bTWO_TASK=/.test(v.source) && !/@\/\/|@\w+/.test(v.source) ? lineWhere(/\bORACLE_SID=|\bTWO_TASK=/) : 0);
+  if (sidLine) out.push(issue(Codes.SHELL_ORACLE_ENV_REVIEW, 'The source connects by ORACLE_SID / operating-system authentication. On 26ai (CDB only) connect to the pluggable database through its service name in [database] dsn.', null, { sourceLine: sidLine }));
+
   // Hosts, users and credentials belong in the config file.
   for (const s of f.strings) {
     if (s.docstring) continue;
