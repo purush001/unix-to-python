@@ -36,6 +36,8 @@ test('convert, review, request changes, approve with a failed save and retry, ra
   await expect(page.getByTestId('target-label')).toHaveText('Draft');
   await expect(page.getByTestId('draft-version')).toHaveText('version 1 of 1');
   await expect(page.getByTestId('draft-status')).toContainText('ok with warnings');
+  // the run ID is shown, so a user can quote it in a complaint
+  await expect(page.getByTestId('run-id')).toContainText(/run_[0-9a-f]{16}/);
   const track = page.getByTestId('stage-track');
   for (const stage of ['intake', 'generate', 'validate', 'review', 'results']) await expect(track.locator(`[data-stage="${stage}"]`)).toHaveAttribute('data-status', 'done');
   await expect(track.locator('[data-stage="repair"]')).toHaveAttribute('data-status', /done|skipped/);

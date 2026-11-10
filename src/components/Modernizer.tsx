@@ -585,7 +585,8 @@ export function Modernizer() {
           {run && draft ? (
             <section className="review" aria-labelledby="review-h">
               <h2 id="review-h" className="section-title">
-                {saved || saveFailed ? 'Final review record' : 'Review the draft'} <span className="quiet">version {draft.version}</span>
+                {saved || saveFailed ? 'Final review record' : 'Review the draft'} <span className="quiet">version {draft.version}</span>{' '}
+                <span className="quiet" data-testid="run-id">Run ID <code>{run.id}</code> (quote it when you report a problem)</span>
               </h2>
               <div className="review-grid">
                 <ReviewPanel run={run} draft={draft} />

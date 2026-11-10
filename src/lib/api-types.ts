@@ -1,6 +1,8 @@
 import type { Issue } from '@/pipeline/issue-codes';
 import { ISSUE_CATALOGUE } from '@/pipeline/issue-codes';
-import type { Change, OutputFile, Platform, ProgressEvent, RunRecord, RunState, SanitizeCounts, ScriptType, StageName, Suggestion } from '@/pipeline/types';
+import type { Alert } from '@/lib/alerts';
+import { traceTotals, type TraceTotals } from '@/lib/trace';
+import type { Change, JudgeScore, OutputFile, Platform, ProgressEvent, RunRecord, RunState, SanitizeCounts, ScriptType, Span, StageName, Suggestion } from '@/pipeline/types';
 import { countSummary } from '@/sanitizer/summary';
 
 export interface IssueView extends Issue {
@@ -53,8 +55,49 @@ export interface StatusView {
     rulesPromoted: number;
     rulesRejected: number;
     memory: { retrievals: number; avgLatencyMs: number; avgRuleHits: number; unavailable: number; pendingIndexWrites: number };
+    volume: number;
+    successRate: number;
+    tokens: { input: number; output: number; cacheRead: number; cacheWrite: number };
+    /** Share of input tokens served from the prompt cache. */
+    cacheHitRate: number | null;
+    /** null when a call had no configured price. */
+    costUsd: number | null;
+    unpricedCalls: number;
+    costByModel: Record<string, { calls: number; costUsd: number | null }>;
+    costByDay: Record<string, { runs: number; costUsd: number | null }>;
+    llmLatency: Record<string, { p50: number; p95: number; count: number }>;
+    guardrails: { inputRejected: Record<string, number>; inputBlockRate: number; outputStripped: number; commitBlocked: number };
+    rateLimited: number;
+    topIssueCodes: [string, number][];
+    judge: { judged: number; meanScore: number | null; failedCriteria: Record<string, number> };
+    last24h: { runs: number; failedRuns: number; p95GenerateMs: number | null; costUsd: number | null; unpricedCalls: number; guardrailLeaks: number; judgeMeanScore: number | null; judgedRuns: number; saveFailures: number };
   };
+  alerts: Alert[];
   rules: { id: string; platform: Platform; status: string; version: number; trigger: string[]; guidance: string; sourceRunId: string | null; rejectReason: string | null; witness: unknown }[];
+}
+
+export interface TraceView {
+  /** The trace ID is the run ID. */
+  traceId: string;
+  state: RunState;
+  platform: Platform;
+  scriptType: ScriptType;
+  createdAt: string;
+  totals: TraceTotals;
+  spans: Span[];
+  /** Scores attached to the trace: the user's rating and the live judge's verdict. */
+  scores: { userRating: number | null; judge: JudgeScore | null };
+  witness: { models: string[]; promptVersions: Record<string, string>; effort: string; retrieved: { rules: string[]; examples: string[] }; finalCodes: string[] } | null;
+}
+
+export function toTraceView(run: RunRecord): TraceView {
+  const w = run.drafts[run.drafts.length - 1]?.result.witness;
+  return {
+    traceId: run.id, state: run.state, platform: run.platform, scriptType: run.scriptType, createdAt: run.createdAt,
+    totals: traceTotals(run.trace), spans: run.trace ?? [],
+    scores: { userRating: run.rating?.rating ?? null, judge: run.judge ?? null },
+    witness: w ? { models: w.models ?? [], promptVersions: w.promptVersions ?? {}, effort: w.effort ?? '', retrieved: w.retrieved, finalCodes: w.finalCodes } : null,
+  };
 }
 
 const view = (i: Issue): IssueView => ({ ...i, explanation: ISSUE_CATALOGUE[i.code].explanation, nextStep: ISSUE_CATALOGUE[i.code].nextStep });
