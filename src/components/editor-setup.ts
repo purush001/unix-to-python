@@ -65,14 +65,14 @@ interface Tones {
 /* Every colour pair here is listed with its contrast ratio at the top of globals.css. */
 const TONES: Record<EditorTone, Tones> = {
   paper: {
-    bg: '#FFFDF5', text: '#2A1B0C', gutterBg: '#F7EFD8', gutterText: '#6E5A40', activeLine: '#FFFDF5', selection: '#F5D56B', caret: '#9A3A00',
-    flag: '#FBE2A0', flagEdge: '#A84300', focus: '#FBE2A0', focusEdge: '#2A1B0C',
-    keyword: '#9A3A00', string: '#6B5200', comment: '#6E5A40', number: '#8A2F4B', fn: '#1F5560', type: '#1F5560',
+    bg: '#FFFFFF', text: '#1A1433', gutterBg: '#F3F0FF', gutterText: '#5F5985', activeLine: '#FAF8FF', selection: '#DDD6FE', caret: '#6D28D9',
+    flag: '#FDE68A', flagEdge: '#92400E', focus: '#FDE68A', focusEdge: '#1A1433',
+    keyword: '#6D28D9', string: '#9D174D', comment: '#5F5985', number: '#92400E', fn: '#0B5E73', type: '#046648',
   },
   ink: {
-    bg: '#21160D', text: '#F6E7C8', gutterBg: '#21160D', gutterText: '#A8916F', activeLine: '#2E2013', selection: '#5A2E08', caret: '#FFB45E',
-    flag: '#5A2E08', flagEdge: '#FFB45E', focus: '#5A2E08', focusEdge: '#F5D56B',
-    keyword: '#FFB45E', string: '#F5D56B', comment: '#BFA98A', number: '#FF9D7A', fn: '#FFD9A0', type: '#9FD6C2',
+    bg: '#140F2E', text: '#ECE9FF', gutterBg: '#140F2E', gutterText: '#9691BF', activeLine: '#1E1842', selection: '#3A1878', caret: '#F9A8D4',
+    flag: '#3A1878', flagEdge: '#F9A8D4', focus: '#3A1878', focusEdge: '#FCD34D',
+    keyword: '#C4B5FD', string: '#F9A8D4', comment: '#A5A1C8', number: '#FCD34D', fn: '#67E8F9', type: '#6EE7B7',
   },
 };
 
@@ -86,7 +86,7 @@ export function editorTheme(tone: EditorTone): Extension {
       '.cm-content': { caretColor: c.caret, padding: '10px 0' },
       '.cm-cursor, .cm-dropCursor': { borderLeftColor: c.caret, borderLeftWidth: '2px' },
       '&.cm-focused > .cm-scroller > .cm-selectionLayer .cm-selectionBackground, .cm-selectionBackground, .cm-content ::selection': { backgroundColor: c.selection },
-      '.cm-gutters': { backgroundColor: c.gutterBg, color: c.gutterText, border: 'none', borderRight: `1px solid ${c.gutterText}` },
+      '.cm-gutters': { backgroundColor: c.gutterBg, color: c.gutterText, border: 'none', borderRight: `1px solid ${tone === 'paper' ? '#DDD6FE' : '#2E1065'}` },
       '.cm-lineNumbers .cm-gutterElement': { padding: '0 10px 0 12px', minWidth: '34px' },
       '.cm-activeLine': { backgroundColor: c.activeLine },
       '.cm-activeLineGutter': { backgroundColor: c.activeLine, color: c.text },
@@ -97,8 +97,8 @@ export function editorTheme(tone: EditorTone): Extension {
       '.cm-foldPlaceholder': { backgroundColor: 'transparent', border: `1px solid ${c.gutterText}`, color: c.text },
       '.cm-panels': { backgroundColor: c.gutterBg, color: c.text },
       '.cm-tooltip': { backgroundColor: c.gutterBg, color: c.text, border: `1px solid ${c.gutterText}` },
-      '.cm-changedLine': { backgroundColor: tone === 'paper' ? '#DDEFD5' : '#1E3A2A' },
-      '.cm-deletedChunk': { backgroundColor: tone === 'paper' ? '#F8D9CF' : '#4A1F1A' },
+      '.cm-changedLine': { backgroundColor: tone === 'paper' ? '#D1FAE5' : '#0F3B33' },
+      '.cm-deletedChunk': { backgroundColor: tone === 'paper' ? '#FFE4E6' : '#45132F' },
       '.cm-changedText, .cm-deletedText, .cm-deletedLine .cm-deletedText': { background: 'none !important', textDecoration: 'none' },
       '.cm-deletedLine, .cm-deletedLine del': { textDecoration: 'none' },
       '.cm-collapsedLines': { backgroundColor: c.gutterBg, color: c.text, backgroundImage: 'none', padding: '4px 12px' },

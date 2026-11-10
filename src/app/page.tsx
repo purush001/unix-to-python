@@ -16,8 +16,13 @@ export default function Page() {
             Script Modernizer
           </p>
           <Hook>
-            <h1 className="headline">19c and shell in. Upgrade-safe SQL and Python out.</h1>
+            <h1 className="headline">SQL and Shell {'==>'} SQL and Python</h1>
             <p className="subhead">The SQL and PL/SQL it writes run unchanged on both Oracle 19c and 26ai.</p>
+            <ul className="hero-points">
+              <li>Secrets and names removed first</li>
+              <li>One SQL file for 19c and 26ai</li>
+              <li>Nothing is final until you approve</li>
+            </ul>
           </Hook>
         </div>
       </header>

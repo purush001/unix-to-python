@@ -3,7 +3,7 @@ import { connection } from 'next/server';
 import './globals.css';
 
 export const metadata: Metadata = {
-  title: 'Script Modernizer — 19c and shell in, upgrade-safe SQL and Python out',
+  title: 'Script Modernizer — SQL and Shell ==> SQL and Python',
   description: 'Converts Oracle 19c SQL, PL/SQL and Unix shell scripts into SQL that runs on both 19c and 26ai, and Python.',
 };
 
