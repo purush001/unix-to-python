@@ -2,7 +2,7 @@ import type { Issue } from '@/pipeline/issue-codes';
 import { ISSUE_CATALOGUE } from '@/pipeline/issue-codes';
 import type { Alert } from '@/lib/alerts';
 import { traceTotals, type TraceTotals } from '@/lib/trace';
-import type { Change, JudgeScore, OutputFile, Platform, ProgressEvent, RunRecord, RunState, SanitizeCounts, ScriptType, Span, StageName, Suggestion } from '@/pipeline/types';
+import type { Change, JudgeScore, OutputFile, Platform, ProgressEvent, RunRecord, RunState, SanitizeCounts, ScriptType, Span, StageName, Suggestion, Witness } from '@/pipeline/types';
 import { countSummary } from '@/sanitizer/summary';
 
 export interface IssueView extends Issue {
@@ -87,7 +87,8 @@ export interface TraceView {
   spans: Span[];
   /** Scores attached to the trace: the user's rating and the live judge's verdict. */
   scores: { userRating: number | null; judge: JudgeScore | null };
-  witness: { models: string[]; promptVersions: Record<string, string>; effort: string; retrieved: { rules: string[]; examples: string[] }; finalCodes: string[] } | null;
+  /** The latest draft's witness: hashes, versions, codes per stage and retrieved IDs. No script text. */
+  witness: Witness | null;
 }
 
 export function toTraceView(run: RunRecord): TraceView {
@@ -96,7 +97,7 @@ export function toTraceView(run: RunRecord): TraceView {
     traceId: run.id, state: run.state, platform: run.platform, scriptType: run.scriptType, createdAt: run.createdAt,
     totals: traceTotals(run.trace), spans: run.trace ?? [],
     scores: { userRating: run.rating?.rating ?? null, judge: run.judge ?? null },
-    witness: w ? { models: w.models ?? [], promptVersions: w.promptVersions ?? {}, effort: w.effort ?? '', retrieved: w.retrieved, finalCodes: w.finalCodes } : null,
+    witness: w ? { ...w, models: w.models ?? [], promptVersions: w.promptVersions ?? {}, effort: w.effort ?? '' } : null,
   };
 }
 

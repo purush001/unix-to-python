@@ -30,6 +30,8 @@ describe('S13 input guardrails: wrong content type', () => {
     expect(classify('#!/bin/ksh\n[ -f /tmp/x ] && echo found\nexit 0\n').type).toBe('shell');
     expect(classify("SELECT '{\"a\": 1}' FROM DUAL;\n").type).toBe('sql');
     expect(classify("BEGIN\n  DBMS_OUTPUT.PUT_LINE('<html>');\nEND;\n/\n").type).toBe('plsql');
+    // a literal ESC byte (colour codes) is ordinary in shell scripts
+    expect(classify('#!/bin/sh\necho "\u001B[31mfailed\u001B[0m"\nexit 1\n').type).toBe('shell');
     // a user-selected type cannot override a wrong content type
     expect(classify('<!DOCTYPE html><html></html>', 'sql').type).toBe('unsupported');
   });

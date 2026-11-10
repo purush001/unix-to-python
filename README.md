@@ -35,7 +35,11 @@ Enter the access token in the page, paste a script (or use *Load example*) and p
 | `npm run build && npm start` | Production build and server |
 | `npm test` | Static secret-handling check, then the unit tests (Vitest) |
 | `npm run test:e2e` | Browser flow against the mocks (Playwright) |
-| `npm run eval` | Eval suite; writes `eval-report.json`; exits non-zero if a hard gate fails |
+| `npm run typecheck` | TypeScript check |
+| `npm run eval` | Eval suite; writes `eval-report.json`; exits non-zero if a hard gate fails, a fixture fails, or a metric is below `evals/baseline.json` |
+| `npm run eval -- --update-baseline` | Rewrites the committed baseline (refused while anything fails) |
+| `npm run eval:calibrate` | Judge agreement with the human labels in `evals/judge/labels.json` |
+| `npm run replay <dir>` | Replays a committed conversion offline from its sanitized input and lists every difference from `witness.json` |
 | `npm run verify-witness <dir>` | Re-runs the validators on a committed conversion and compares with `witness.json` |
 | `npm run reindex-memory` | Rebuilds the Chroma collections from Supabase |
 | `npm run db:migrate` | Applies `supabase/migrations/*.sql` |
@@ -62,7 +66,9 @@ browser ──► /api/convert ──► orchestrator
   SQL is spliced back, then the shell-agent converts the whole script.
 - **Pipeline** (`src/pipeline/engine.ts`): transient provider failures (malformed or empty output,
   HTTP 5xx, timeout, network) are retried twice with backoff and jitter and never consume a repair
-  attempt. Two repair attempts by default. Repair stops early when the set of error **codes** is
+  attempt. A refusal is never retried. Two repair attempts by default. A run also has a token
+  budget (`MAX_RUN_TOKENS`); when it is spent no further model call starts
+  (`RUN_TOKEN_BUDGET_REACHED`). Repair stops early when the set of error **codes** is
   unchanged (`REPAIR_NO_PROGRESS`). If a repair call fails, the last usable draft is kept
   (`REPAIR_FAILED_KEPT_DRAFT`). If nothing could be drafted, the provider error is returned with its
   real HTTP status. Run state is saved after every stage; a request that runs out of time returns
@@ -75,7 +81,8 @@ browser ──► /api/convert ──► orchestrator
 src/pipeline/               engine, issue codes, types, construct tagging
 src/adapters/plsql/         tokenizer, splitter, block analysis, dual-compat rules, validators, prompts
 src/adapters/shell-python/  shell parser, WASM Python parser, validators, the standard Python runtime, prompts
-src/agents/                 sql-agent, shell-agent, orchestrator, reply format
+src/agents/                 sql-agent, shell-agent, orchestrator, reply format, shared prompt parts (HONESTY_RULE)
+src/judge/                  LLM-as-judge (rubric, verdict schema) and the live judge used by the cron job
 src/sanitizer/              secrets, hosts and users, names and emails, personal values, scans
 src/providers/              llm, github, smtp, storage (Supabase), memory (Chroma), embeddings — each mock + real
 src/learning/               memory retrieval and the propose → verify → improve loop
@@ -84,7 +91,9 @@ src/config/env.ts           the only module that reads process.env (getSecret / 
 skills/base/                hand-written rules (learned rules live in the database)
 evals/fixtures/, evals/     golden and adversarial fixtures, suite and runner
 supabase/migrations/        schema with Row Level Security
-scripts/                    check-secrets, verify-witness, reindex-memory, migrate, vercel-ignore-build
+scripts/                    check-secrets, verify-witness, replay, reindex-memory, migrate, vercel-ignore-build
+docs/                       audit (facts, gap report, VERIFY register), design decisions, evals, runbooks, release readiness
+.github/workflows/ci.yml    typecheck, tests, evals against the baseline, build and browser flow, all on mocks
 vercel.json                 function durations, cron schedules, data-branch rules, region
 ```
 
@@ -144,6 +153,7 @@ the embedding provider or GitHub. If the sanitizer or a scan fails, the run stop
 | Remote users in ssh, scp, sftp, ftp, rsync | `source_user` / `target_user` |
 | Passwords, tokens, keys, passphrases (including `sqlplus user/pw@db` and passwords read from files) | an environment or config reference such as `${DB_PASSWORD}` or `&&db_password` |
 | Personal values in literals (employee, operator and national IDs, names, dates of birth, phones, addresses) | synthetic values of the same type, e.g. `'EMPLID_1'`, `DATE '1900-01-01'` |
+| Encoding tricks: invisible characters (zero-width, bidirectional controls); an e-mail address hidden by `%40` or full-width characters; a host name with `%2E` dots | invisible characters are removed; the hidden address or host is decoded, then replaced as above; warning `SANITIZE_OBFUSCATION_NORMALIZED` |
 
 Database schema names (`SYSADM`), identifiers, column and record names are never changed. The user
 sees a count summary only ("3 emails, 2 hosts, 1 user, 1 password replaced"); the mapping lives in
@@ -151,7 +161,9 @@ memory for the sanitizing request and is discarded.
 
 **Deny-list.** Set `DENYLIST_PATH` to a server-side file with one name or term per line. Never commit it.
 
-**Limits of a deterministic sanitizer.** Names are found by context. A name that appears only in
+**Limits of a deterministic sanitizer.** A value hidden by base64, hex or a cipher is not found;
+the script is never decoded as a whole, because that would change legitimate text such as
+`date +%Y%m%d`. Names are found by context. A name that appears only in
 free text with no cue (no header keyword, change-log shape, email or home directory) is not found
 unless it is on the deny-list. A bare user ID cannot be tied to a full name, so `jsmith` and
 `John Smith` get different placeholders unless a `j.smith`/`jsmith` spelling can be derived.
@@ -198,7 +210,8 @@ function: authenticate → validate (zod) → load state from storage → work �
 | `POST /api/runs/:id/approve` | Mark final, save to GitHub; call again to retry a failed save |
 | `POST /api/runs/:id/feedback` `{ rating?, comment?, errorCode?, line? }` | Rating or problem report |
 | `GET /api/runs/:id` | Stored state (page recovery) |
-| `GET /api/status` | Recent runs, metrics, learned rules with witnesses |
+| `GET /api/runs/:id/trace` | The run's trace: every span with tokens, cost and latency, the witness, and the attached scores. No script text |
+| `GET /api/status` | Recent runs, dashboard metrics, alerts, learned rules with witnesses |
 | `POST /api/rules/:id/disable` | A human disables a learned rule (addition to the spec) |
 | `GET /api/health` | Which providers are mock or real; no configuration values |
 | `GET /api/cron/learn`, `GET /api/cron/cleanup` | Vercel Cron only; reject requests without `CRON_SECRET` |
@@ -208,7 +221,8 @@ All routes except `/api/health` and the cron routes need `Authorization: Bearer 
 `Accept: application/x-ndjson`. Headers are held back until the first unit has been drafted, so a
 provider failure before any draft still returns its real status. Errors:
 `{ "error": { "code", "message", "status", "runId?" } }` — 400 bad input, 401 missing token,
-413 oversize, 422 unsupported type, 429 rate limit, and the provider's own status.
+413 oversize, 415 body not sent as `application/json`, 422 unsupported type, 429 rate limit, and the
+provider's own status (a model refusal is 422).
 
 ## Switching from mocks to real providers
 
@@ -223,9 +237,17 @@ Each provider is chosen by one variable; anything not set stays on its mock.
 | Embeddings | `EMBEDDINGS_PROVIDER` | `voyage` | `VOYAGE_API_KEY`, optional `EMBEDDINGS_MODEL`, `EMBEDDINGS_BASE_URL` |
 | SMTP | `SMTP_PROVIDER` | `smtp` | `SMTP_HOST`, `SMTP_PORT`, `SMTP_FROM`, optional `SMTP_USER`, `SMTP_PASSWORD` |
 
-The model provider uses the official Anthropic SDK with adaptive thinking, streaming, and
-server-side refusal fallbacks (`fallbacks: "default"`). The default provider timeout is 60 seconds
-per call; raise `PROVIDER_TIMEOUT_MS` for very large scripts.
+The model provider uses the official Anthropic SDK with adaptive thinking, streaming, prompt
+caching of the system prompt, and server-side refusal fallbacks (`fallbacks: "default"`). Effort,
+token caps, retries, cache lifetime and the fallback beta header are configuration (`LLM_*` in
+`.env.example`), never literals. The default provider timeout is 60 seconds per call; raise
+`PROVIDER_TIMEOUT_MS` for very large scripts. Before the first real call, read
+`docs/audit/verify-register.md`: the request shape has only been tested against stubbed HTTP.
+
+**Prompts.** Every system prompt (two agents, reviewer, rule writer, judge) is built in
+`src/agents/prompts.ts` in a fixed order and carries the same `HONESTY_RULE` constant. Each has a
+version hash that is written to every trace, log line and witness. When a model cannot comply it
+says so with a structured "unknown" signal (`CONVERT_UNKNOWN`, `REVIEW_UNKNOWN`) and does not guess.
 
 **The mock model is a deterministic converter, not a language model.** It applies the mechanical
 rules (error capture, `SERVEROUTPUT`, shell-to-Python mapping for common wrapper constructs) and
@@ -352,13 +374,17 @@ shown with a Retry button, and the final output is not lost. No pull request is 
 
 **Witness.** `witness.json` records the run ID, input and output hashes (of sanitized text),
 platform, validator versions, issue codes at each stage, sanitizer counts before and hits after,
-syntax-check results, rule IDs applied, retrieved memory IDs, attempt counts and timestamps.
+syntax-check results, rule IDs applied, retrieved memory IDs, the model IDs that answered, the
+version of each system prompt, the effort level, attempt counts and timestamps.
 
 ```bash
 npm run verify-witness conversions/2026-11-10-run_1a2b3c4d5e6f7a8b
 ```
 
 re-runs the validators on the committed files and fails if a hash or the issue codes differ.
+`npm run replay <dir>` goes further: it runs the whole pipeline again from the stored sanitized
+input and reports each difference from the witness by kind (input, retrieval, prompt, model,
+effort, validator, output).
 
 **Loop: propose → verify → improve.**
 
@@ -376,30 +402,48 @@ re-runs the validators on the committed files and fails if a hash or the issue c
 
 ## Evals
 
-`npm run eval` runs ten golden fixtures (HCM payroll extract with spool and SFTP; HCM update with a
-cursor loop and commit in the loop; GL journal load through SQL\*Loader; AP voucher file by ftp; DBA
-tablespace check mailed with mailx; `psae` launcher; Data Mover wrapper; PL/SQL package with
-concatenated dynamic SQL; DDL deployment with existence-check wrappers; mixed shell and SQL with ssh,
-scp and a password on the command line) and six adversarial ones (instructions hidden in comments,
-personal data in many formats, oversize, empty, plain prose, PeopleCode). All personal data is
-synthetic and seeded.
+`npm run eval` runs 10 golden fixtures (one per use case and router branch) and 11 adversarial
+ones: hidden instructions, personal data in many formats, encoding tricks, oversize, empty, prose,
+PeopleCode, and HTML, JSON, Python and binary input. All personal data is synthetic and seeded.
 
-Hard gates: zero sanitizer leaks, zero secrets in output, every output passes its syntax check
-(`python3 -m py_compile` is also run when an interpreter is present — it compiles, it never runs),
-and zero `SQL_NOT_DUAL_COMPATIBLE` hits. The report also gives validator pass rate, repair rate,
-transient retry count and warnings by code. A real-provider run is opt-in:
-`EVAL_REAL_PROVIDER=1 LLM_PROVIDER=anthropic ANTHROPIC_API_KEY=… npm run eval`; it is never part of `npm test`.
+- **Hard gates (code graders):** zero sanitizer leaks, zero secrets in output, every output passes
+  its syntax check (`python3 -m py_compile` too when an interpreter is present; it compiles, never
+  runs), zero `SQL_NOT_DUAL_COMPATIBLE` hits, zero invented rule IDs.
+- **Regression gate:** `evals/baseline.json` is committed; any fixture or metric worse than the
+  baseline fails the run. CI runs it on every push and pull request.
+- **Reported rates:** attack block rate, and guardrail false-positive rate on the scripts in
+  `evals/real-traffic/` (none yet, so that rate is not measured).
+- **Judge:** an LLM judge scores faithfulness on six yes-or-no criteria, with evidence before each
+  answer. It is never a gate on its own, and it is **not calibrated** until 30 human-labelled cases exist.
+
+A real-provider run is opt-in and never part of `npm test`:
+`EVAL_REAL_PROVIDER=1 LLM_PROVIDER=anthropic ANTHROPIC_API_KEY=… npm run eval`. Details: `docs/evals/README.md`.
 
 ## Observability
 
-Structured JSON logs go to stdout (Vercel runtime logs) and to the `app_logs` table, kept
-`LOG_RETENTION_DAYS` (default 14) by the cleanup cron. Each entry has timestamp, level, run ID,
-stage, platform, duration, attempt and retry counts, issue codes, provider status and token usage
-when reported. Script content is never logged, and log values are redacted. The app writes no local
-files. `GET /api/status` (and the Status view) report runs by state, stage durations (p50, p95),
-repair rate, transient retry rate, failures by code, rating distribution, GitHub save failures,
-rules promoted and rejected, memory retrieval latency and hit counts, and failed Chroma writes
-awaiting retry.
+- **Trace.** One trace per run; the trace ID is the run ID, which is shown in the review panel and
+  written to every log line. Every stage, model call, retrieval and guardrail adds a span.
+  Model-call spans carry the model that answered, prompt version, effort, stop reason, input,
+  output and cache tokens, cost and latency, using OpenTelemetry GenAI attribute names. Spans are
+  stored in the run record and served by `GET /api/runs/:id/trace`; they are not exported to an
+  external tracing product.
+- **Cost.** Computed per call from usage and the `LLM_PRICES` table. A model with no configured
+  price is reported as "cost unknown", never as zero.
+- **Logs.** Structured JSON to stdout (Vercel runtime logs) and to the `app_logs` table, kept
+  `LOG_RETENTION_DAYS` (default 14). Script content is never logged, and log values are redacted.
+- **Scores.** The user's rating and the live judge's verdict are attached to the trace. The learn
+  cron job scores a sample of finished runs (`LIVE_JUDGE_SAMPLE_PERCENT`); a user request never waits for a judge.
+- **Dashboard metrics** (`GET /api/status`; panel definitions in `docs/dashboards/status-dashboard.json`):
+  volume, success rate, stage and model-call latency (p50, p95), tokens, cost per model and per
+  day, cache hit rate, repair and retry rates, guardrail block rate, judge scores, rating
+  distribution, top issue codes, rate-limit responses, save failures. The Status page in the
+  browser still shows the earlier subset.
+- **Alerts** (`alerts` in `GET /api/status`; mailed daily by the cleanup cron to `ALERT_OWNER`):
+  error rate, p95 latency, daily cost, any guardrail leak, judge score drop, save failures. Each
+  has a threshold variable. See `docs/runbooks/alerts.md`.
+
+Runbooks: `docs/runbooks/complaint.md` (debugging a complaint from a run ID),
+`alerts.md`, `key-rotation.md`, `rollback.md`.
 
 ## Issue-code catalogue
 
@@ -412,6 +456,7 @@ All codes are defined once in `src/pipeline/issue-codes.ts`. Code compares codes
 | `INPUT_UNSUPPORTED_TYPE` | error | The input is not a script type this tool converts (for example PeopleCode, SQR source, COBOL source, an Application Engine definition, a Data Mover .dms body, or plain prose). | Convert the shell or SQL wrapper that launches the program instead; the program source itself is out of scope. |
 | `SANITIZE_LEAK_DETECTED` | error | A host, user, email address, personal value or other protected item was found in text that should already be sanitized. The run was stopped. | Remove the item from the source script and convert again. If it is a false positive, report it with the feedback button. |
 | `SANITIZE_HOST_ROLE_AMBIGUOUS` | warning | The sanitizer could not tell whether a host is the source or the target, so it used target_server. | Check the highlighted line and correct the placeholder if this host is really the source. |
+| `SANITIZE_OBFUSCATION_NORMALIZED` | warning | The script contained invisible characters, or an e-mail address or host name hidden by percent-encoding or full-width characters. They were removed or decoded so the sanitizer could replace them. | Check that the script still reads as intended. Invisible characters in a script are unusual and can hide text from a reviewer. |
 | `SECRET_IN_OUTPUT` | error | Something that looks like a password, token or key appears in the output. | Replace it with a config or environment reference. Never approve output that contains a secret. |
 | `SQL_PARSE_ERROR` | error | The SQL or PL/SQL does not parse: an unbalanced block, quote, comment, parenthesis or a missing terminator. | Look at the line shown, fix the structure, or request changes with a note. |
 | `SQL_DESUPPORTED_FEATURE` | error | The script uses a feature that is desupported in Oracle AI Database 26ai and would fail after the upgrade. | Use the replacement named in the message; it must work on both 19c and 26ai. |
@@ -443,7 +488,11 @@ All codes are defined once in `src/pipeline/issue-codes.ts`. Code compares codes
 | `REVIEW_TXN_BOUNDARY_CHANGED` | error | A COMMIT or ROLLBACK was added, removed or moved. | Restore the original transaction boundaries. |
 | `REVIEW_STATEMENT_LOST` | error | The reviewer found a source statement with no equivalent in the output. | Restore the statement or explain its removal in the change list. |
 | `REVIEW_EXIT_CODE_CHANGED` | error | The reviewer found that an exit code changed. | Restore the original exit code. |
+| `REVIEW_UNKNOWN` | warning | The reviewer could not determine whether part of the draft is faithful to the source. | Check the line named in the message by hand before approving. |
 | `REVIEW_UNAVAILABLE` | warning | The independent review could not be completed. | Review the diff by hand with extra care before approving. |
+| `CONVERT_UNKNOWN` | warning | The converter could not convert part of the script with certainty, so it left that part as it was and said what is missing. | Read the message, supply the missing information in a "request changes" note, or convert that part by hand. |
+| `CHANGE_RULE_UNKNOWN` | error | The change list cites a rule ID that was neither supplied to the model nor built in, so the stated reason for a change cannot be traced. | Request changes, or check the change by hand: its rule ID was invented. |
+| `RUN_TOKEN_BUDGET_REACHED` | warning | The run reached its token budget, so no further model calls were made for it. | Review the draft and its remaining issues by hand, or split the script and convert the parts. |
 | `REPAIR_NO_PROGRESS` | warning | An automatic repair attempt did not change the set of errors, so repairing stopped early. | Fix the remaining errors by hand or request changes with a note. |
 | `REPAIR_FAILED_KEPT_DRAFT` | warning | A repair call failed. The last usable draft was kept. | Review the remaining errors; convert again later if the provider was unavailable. |
 | `MEMORY_UNAVAILABLE` | warning | The skill memory could not be reached. The conversion used the built-in rules only. | No action needed for this run. Check the memory provider if it keeps happening. |
@@ -477,11 +526,33 @@ end state when `prefers-reduced-motion` is set.
 
 ## Known limits and unverified items
 
+The full list, with how to confirm each item, is `docs/audit/verify-register.md`. The state of
+every standard is in `docs/audit/01-gap-report.md`; the release verdict is `docs/release/readiness.md`.
+
 - **Real providers** other than Postgres storage were not run against live services (no keys in the
-  build environment). Postgres storage runs on Supabase in the Vercel deployments.
-- **Vercel:** the full API flow was verified on a preview with Supabase storage. Production runs the same build but was checked only through the Vercel API (ready and aliased), not by calling it. The two cron jobs are registered there; their runs have not been observed.
-- **Documentation checks.** Oracle facts were read on docs.oracle.com. Vercel, Supabase, Chroma and
-  Voyage facts came from package sources and search summaries because those sites were unreachable.
+  build environment). Postgres storage runs on Supabase in the Vercel deployments. The Claude
+  request shape (adaptive thinking, effort, prompt caching, refusal fallback) is tested against
+  stubbed HTTP only.
+- **Evals ran on the mock provider only.** The committed baseline covers the mock. No effort sweep
+  was run; effort `high` is an assumption.
+- **The judge is not calibrated** (0 of 30 human-labelled cases). The mock judge decides one
+  criterion for SQL and answers "unknown" for the rest, so its score is not a quality measure.
+- **Guardrail false-positive rate is not measured:** there are no real-traffic samples yet.
+- **No named approver.** Approval is authenticated by one shared access token, so the application
+  cannot record who approved. This needs an identity provider.
+- **Sanitizer.** Values hidden by base64, hex or a cipher are not found. See "Sanitization" for
+  the limits on names.
+- **Hallucination checks.** Code catches lost or renamed objects, lost variables and invented rule
+  IDs. A brand-new identifier that replaces nothing is checked only by the judge.
+- **Retrieval quality is not measured:** there is no labelled set and no recall at k.
+- **Tracing and alerts.** Spans stay in the run record; nothing is exported to a tracing product.
+  Alerts are evaluated daily, not in real time. Cache prices for models other than
+  `claude-opus-5-5` in the built-in price table are derived, not confirmed.
+- **Rollback and key rotation** are written down but were not rehearsed.
+- **Vercel:** the full API flow was verified on a preview with Supabase storage before this change. Production runs an earlier build and was checked only through the Vercel API (ready and aliased), not by calling it. The two cron jobs are registered there; their runs have not been observed.
+- **Documentation checks.** Oracle facts were read on docs.oracle.com. Claude API facts were checked
+  against the reference bundled with the coding agent, not the vendor pages. Vercel, Supabase,
+  Chroma and Voyage facts came from package sources and search summaries.
 - **Mock converter scope** — see "Switching from mocks to real providers".
 - **SQL parse check** is a structure check (quotes, comments, parentheses, blocks, terminators), the
   minimum the specification allows; it is not a full Oracle grammar.

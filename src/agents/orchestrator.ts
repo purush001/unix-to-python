@@ -16,7 +16,8 @@ import { langOfFile, sanitize, SANITIZER_VERSION, scanSanitized, scanSecrets } f
 
 const UNSUPPORTED: [RegExp, string][] = [
   // wrong content type: not a script at all
-  [/[\u0000-\u0008\u000E-\u001F]|^%PDF-\d/, 'a binary file'],
+  // control bytes that never occur in a text script (ESC is left out: scripts print colour codes with it)
+  [/[\u0000-\u0008\u000E-\u001A]|^%PDF-\d/, 'a binary file'],
   // anchored at the start: '<html>' inside a string literal of a real script is not an HTML document
   [/^\s*(?:<!--[\s\S]*?-->\s*)*(?:<!DOCTYPE\s+html\b|<html[\s>])/i, 'an HTML document'],
   [/^#!.*\bpython[\d.]*\b|^\s*if\s+__name__\s*==\s*['"]__main__['"]\s*:/m, 'Python source'],
