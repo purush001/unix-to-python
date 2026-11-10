@@ -9,6 +9,8 @@ next-env.d.ts
 .env.*.local
 config.ini
 eval-report.json
+evals/real-traffic/*
+!evals/real-traffic/README.md
 test-results/
 playwright-report/
 __pycache__/

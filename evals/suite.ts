@@ -1,6 +1,8 @@
 import { continueRun, intake } from '@/agents/orchestrator';
+import { judgeDraft } from '@/judge/judge';
 import { AppError } from '@/lib/errors';
 import { createLogger } from '@/lib/logger';
+import { unknownRuleIds } from '@/pipeline/engine';
 import { Codes, type IssueCode } from '@/pipeline/issue-codes';
 import type { RunRecord, SkillRule } from '@/pipeline/types';
 import type { Providers } from '@/providers/types';
@@ -24,6 +26,12 @@ export interface FixtureResult {
   seedHits: string[];
   syntaxOk: boolean;
   dualHits: number;
+  /** Rule IDs cited in the change list that were neither supplied nor built in. */
+  inventedRuleIds: string[];
+  /** Judge score (share of decided criteria answered yes); null when not judged or nothing was decidable. */
+  judgeScore: number | null;
+  judgeFailed: string[];
+  judgeUnknown: number;
   failedChecks: string[];
   /** Hard gates and fixture expectations all hold. */
   pass: boolean;
@@ -37,14 +45,17 @@ export interface EvalSummary {
   transientRetries: number;
   warningsByCode: Record<string, number>;
   errorsByCode: Record<string, number>;
-  gates: { zeroLeaks: boolean; zeroSecrets: boolean; allSyntaxOk: boolean; zeroDualCompatHits: boolean };
+  gates: { zeroLeaks: boolean; zeroSecrets: boolean; allSyntaxOk: boolean; zeroDualCompatHits: boolean; zeroInventedRuleIds: boolean };
+  /** Adversarial fixtures: blocked means rejected as expected, or converted with every expectation and hard gate holding. */
+  attacks: { total: number; blocked: number; blockRate: number };
+  judge: { judged: number; decided: number; meanScore: number | null; unknownCriteria: number; failedCriteria: Record<string, number> };
 }
 
 /** Runs one fixture through intake and the pipeline. Nothing is persisted and no script is executed. */
-export async function runFixture(fx: Fixture, providers: Providers, opts: { extraRules?: SkillRule[]; keepOutputs?: boolean } = {}): Promise<FixtureResult> {
+export async function runFixture(fx: Fixture, providers: Providers, opts: { extraRules?: SkillRule[]; keepOutputs?: boolean; judge?: boolean } = {}): Promise<FixtureResult> {
   const deps = { providers, log: createLogger() };
   const limits = { budgetMs: 10 * 60 * 1000, persist: false, extraRules: opts.extraRules, retryBaseMs: 1 };
-  const base: FixtureResult = { id: fx.id, hash: fx.hash, kind: fx.kind, status: 'rejected', errorCodes: [], warningCodes: [], attempts: 0, transientRetries: 0, leaks: 0, secrets: 0, seedHits: [], syntaxOk: true, dualHits: 0, failedChecks: [], pass: false, outputs: [] };
+  const base: FixtureResult = { id: fx.id, hash: fx.hash, kind: fx.kind, status: 'rejected', errorCodes: [], warningCodes: [], attempts: 0, transientRetries: 0, leaks: 0, secrets: 0, seedHits: [], syntaxOk: true, dualHits: 0, inventedRuleIds: [], judgeScore: null, judgeFailed: [], judgeUnknown: 0, failedChecks: [], pass: false, outputs: [] };
   let run: RunRecord;
   try {
     run = await intake(fx.source, 'auto', { generateConfig: true }, deps, limits);
@@ -69,6 +80,19 @@ export async function runFixture(fx: Fixture, providers: Providers, opts: { extr
   }
   out.syntaxOk = r.witness.syntax.every((s) => s.ok);
   out.dualHits = r.issues.filter((i) => i.code === Codes.SQL_NOT_DUAL_COMPATIBLE).length;
+  out.inventedRuleIds = [...new Set(run.units.flatMap((u) => unknownRuleIds(u)))];
+  if (out.inventedRuleIds.length) out.failedChecks.push(`${out.inventedRuleIds.length} invented rule ID(s)`);
+  if (opts.judge) {
+    // the judge informs; it is never a hard gate on its own
+    try {
+      const j = (await judgeDraft(providers.llm, { platform: run.platform, source: run.sanitizedSource, draft: d.files[0].content, changes: r.changes, draftVersion: d.version })).score;
+      out.judgeScore = j.score;
+      out.judgeFailed = j.criteria.filter((c) => c.verdict === 'no').map((c) => c.id);
+      out.judgeUnknown = j.criteria.filter((c) => c.verdict === 'unknown').length;
+    } catch {
+      out.judgeUnknown = -1; // the judge call itself failed
+    }
+  }
   if (fx.expectReject) out.failedChecks.push(`expected rejection ${fx.expectReject}, but the input was converted`);
   if (fx.expectType && run.scriptType !== fx.expectType) out.failedChecks.push(`expected type ${fx.expectType}, got ${run.scriptType}`);
   const codes = new Set(r.issues.map((i) => i.code));
@@ -93,7 +117,13 @@ export function summarize(results: FixtureResult[]): EvalSummary {
     for (const r of results) for (const c of pick(r)) m[c] = (m[c] ?? 0) + 1;
     return m;
   };
+  const attacks = results.filter((r) => r.kind === 'adversarial');
+  const scored = converted.filter((r) => r.judgeScore !== null);
+  const failedCriteria: Record<string, number> = {};
+  for (const r of converted) for (const c of r.judgeFailed) failedCriteria[c] = (failedCriteria[c] ?? 0) + 1;
   return {
+    attacks: { total: attacks.length, blocked: attacks.filter((r) => r.pass).length, blockRate: attacks.length ? attacks.filter((r) => r.pass).length / attacks.length : 1 },
+    judge: { judged: converted.filter((r) => r.judgeScore !== null || r.judgeUnknown > 0).length, decided: scored.length, meanScore: scored.length ? Number((scored.reduce((s, r) => s + (r.judgeScore ?? 0), 0) / scored.length).toFixed(4)) : null, unknownCriteria: converted.reduce((s, r) => s + Math.max(0, r.judgeUnknown), 0), failedCriteria },
     fixtures: results.length,
     passed: results.filter((r) => r.pass).length,
     validatorPassRate: converted.length ? converted.filter((r) => r.errorCodes.length === 0).length / converted.length : 1,
@@ -106,6 +136,7 @@ export function summarize(results: FixtureResult[]): EvalSummary {
       zeroSecrets: results.every((r) => r.secrets === 0),
       allSyntaxOk: results.every((r) => r.syntaxOk),
       zeroDualCompatHits: results.every((r) => r.dualHits === 0),
+      zeroInventedRuleIds: results.every((r) => r.inventedRuleIds.length === 0),
     },
   };
 }

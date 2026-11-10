@@ -1,0 +1,5 @@
+{
+  "job": "purge_work",
+  "query": "select * from ps_job where emplid = '1';",
+  "steps": [{ "run": "begin delete from ps_nw_tmp_work; commit; end;" }]
+}

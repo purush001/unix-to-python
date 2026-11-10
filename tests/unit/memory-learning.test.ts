@@ -92,7 +92,7 @@ describe('memory retrieval', () => {
   });
 });
 
-const result = (id: string, over: Partial<FixtureResult> = {}): FixtureResult => ({ id, hash: 'h', kind: 'golden', status: 'ok', errorCodes: [], warningCodes: [], attempts: 0, transientRetries: 0, leaks: 0, secrets: 0, seedHits: [], syntaxOk: true, dualHits: 0, failedChecks: [], pass: true, outputs: [], ...over });
+const result = (id: string, over: Partial<FixtureResult> = {}): FixtureResult => ({ id, hash: 'h', kind: 'golden', status: 'ok', errorCodes: [], warningCodes: [], attempts: 0, transientRetries: 0, leaks: 0, secrets: 0, seedHits: [], syntaxOk: true, dualHits: 0, inventedRuleIds: [], judgeScore: null, judgeFailed: [], judgeUnknown: 0, failedChecks: [], pass: true, outputs: [], ...over });
 
 describe('learning loop', () => {
   it('compares eval results: regressions, improvements and leaks', () => {

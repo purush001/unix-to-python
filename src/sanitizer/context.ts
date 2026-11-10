@@ -34,6 +34,8 @@ export class Ctx {
   private seq = { source_server: 0, target_server: 0, source_user: 0, target_user: 0, dev: 0, personal: new Map<string, number>() };
   private personalValues = new Map<string, string>();
   ambiguous = new Set<string>();
+  /** Invisible characters removed and encoded e-mail addresses or hosts decoded before the passes ran. */
+  obfuscated = 0;
 
   private next(base: 'source_server' | 'target_server' | 'source_user' | 'target_user'): string {
     const n = ++this.seq[base];

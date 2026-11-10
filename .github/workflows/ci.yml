@@ -1,0 +1,47 @@
+# S14: every change to a prompt, model ID, effort level, rule, validator or guardrail runs
+# the unit tests and the eval suite. A hard-gate failure, a failing fixture or any metric
+# below evals/baseline.json fails the job. Everything runs on mock providers: no keys.
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [main, 'claude/**']
+
+permissions:
+  contents: read
+
+jobs:
+  test-and-eval:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Typecheck
+        run: npm run typecheck
+      - name: Static secret check and unit tests
+        run: npm test
+      - name: Eval suite (hard gates and baseline)
+        run: npm run eval
+      - name: Judge calibration status
+        run: npm run eval:calibrate
+      - name: Upload the eval report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: eval-report
+          path: eval-report.json
+          if-no-files-found: ignore
+      - name: Build
+        run: npm run build
+        env:
+          APP_ACCESS_TOKEN: ci-access-token-0001
+      - name: Browser flow
+        run: |
+          npx playwright install --with-deps chromium
+          npm run test:e2e

@@ -1,0 +1,8 @@
+import sys
+
+def main():
+    print("select 1 from dual;")
+    return 0
+
+if __name__ == "__main__":
+    sys.exit(main())

@@ -48,6 +48,8 @@
     "reindex-memory": "tsx scripts/reindex-memory.ts",
     "db:migrate": "tsx scripts/migrate.ts",
     "audit": "npm audit --audit-level=moderate",
-    "vercel-build": "tsx scripts/migrate.ts --if-configured && npm run build"
+    "vercel-build": "tsx scripts/migrate.ts --if-configured && npm run build",
+    "eval:calibrate": "tsx evals/calibrate.ts",
+    "replay": "tsx scripts/replay.ts"
   }
 }

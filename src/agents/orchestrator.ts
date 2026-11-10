@@ -15,6 +15,11 @@ import type { Providers } from '@/providers/types';
 import { langOfFile, sanitize, SANITIZER_VERSION, scanSanitized, scanSecrets } from '@/sanitizer';
 
 const UNSUPPORTED: [RegExp, string][] = [
+  // wrong content type: not a script at all
+  [/[\u0000-\u0008\u000E-\u001F]|^%PDF-\d/, 'a binary file'],
+  // anchored at the start: '<html>' inside a string literal of a real script is not an HTML document
+  [/^\s*(?:<!--[\s\S]*?-->\s*)*(?:<!DOCTYPE\s+html\b|<html[\s>])/i, 'an HTML document'],
+  [/^#!.*\bpython[\d.]*\b|^\s*if\s+__name__\s*==\s*['"]__main__['"]\s*:/m, 'Python source'],
   [/\b(IDENTIFICATION|PROCEDURE|DATA|ENVIRONMENT)\s+DIVISION\b/i, 'COBOL source'],
   [/^\s*begin-(program|report|select|procedure|setup|heading)\b/im, 'SQR program source'],
   [/^\s*(Local|Global|Component)\s+(string|number|Record|Rowset|boolean|date|any|integer)\s+&\w+/im, 'PeopleCode'],
@@ -27,9 +32,21 @@ const UNSUPPORTED: [RegExp, string][] = [
 const SHELL_SIGNALS = [/^#!\s*\/\S*(sh|ksh|bash)\b/m, /^\s*(if\s+\[|fi\b|then\b|done\b|esac\b|export\s+\w+=|\w+=\$\(|\w+=`)/m, /\$\{?\w+\}?/, /<<-?\s*['"]?\w+/, /^\s*(echo|cd|rm|cp|mv|mkdir|scp|sftp|ssh|ftp|mailx|sqlplus|sqlldr|psae|psdmtx|pssqr|expdp|impdp|rman|exit)\b/m];
 const SQL_SIGNALS = /\b(select|insert\s+into|update|delete\s+from|merge\s+into|create\s+(or\s+replace\s+)?(table|index|view|procedure|function|package|trigger|sequence|synonym)|alter\s+(table|session|system|user)|drop\s+(table|index|view)|declare|begin|grant|truncate\s+table|audit)\b/i;
 
+function isJsonDocument(text: string): boolean {
+  const t = text.trim();
+  if (!/^[{[]/.test(t) || !/[}\]]$/.test(t)) return false;
+  try {
+    JSON.parse(t);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /** Decides what kind of script was pasted. The user's selector overrides auto-detect. */
 export function classify(text: string, selected: SelectableType = 'auto'): { type: ScriptType; reason?: string } {
   for (const [re, what] of UNSUPPORTED) if (re.test(text)) return { type: 'unsupported', reason: `This looks like ${what}.` };
+  if (isJsonDocument(text)) return { type: 'unsupported', reason: 'This looks like a JSON document.' };
   if (selected !== 'auto') return { type: selected };
   const shellScore = SHELL_SIGNALS.filter((re) => re.test(text)).length;
   const firstLine = text.trimStart().split('\n')[0];

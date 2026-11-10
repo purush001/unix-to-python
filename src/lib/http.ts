@@ -41,6 +41,8 @@ export function errorResponse(e: unknown, runId?: string): Response {
 }
 
 export async function readJson<T>(req: Request, schema: ZodType<T>): Promise<T> {
+  // wrong content type is rejected before the body is read
+  if (!/^application\/json\b/i.test(req.headers.get('content-type') ?? '')) throw new AppError('UNSUPPORTED_MEDIA_TYPE', 'Send the request body as application/json.', 415);
   const limit = getConfigInt('MAX_INPUT_BYTES') * 2 + 4096;
   const declared = Number(req.headers.get('content-length') ?? '0');
   if (declared > limit) throw new AppError('INPUT_TOO_LARGE', 'The request body is larger than the input limit.', 413);
@@ -83,6 +85,7 @@ export function route(auth: Auth, handler: (ctx: RouteCtx) => Promise<Response>,
         const limit = getConfigInt('RATE_LIMIT_PER_MINUTE') * (opts.limited ? 1 : 10);
         const key = `${opts.limited ? 'heavy' : 'light'}:${digest(bearer(req) ?? '').toString('hex').slice(0, 16)}`;
         const r = await providers.storage.rateLimitHit(key, 60, limit);
+        if (!r.allowed) log.warn('rate limited', { bucket: opts.limited ? 'heavy' : 'light' });
         if (!r.allowed) return json(errorBody({ code: 'RATE_LIMITED', message: 'Too many requests. Try again in a minute.', status: 429 }), 429, { 'retry-after': '60' });
       }
       const res = await handler({ req, providers, log, id });

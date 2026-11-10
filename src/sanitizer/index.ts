@@ -3,13 +3,14 @@ import { getConfig } from '@/config/env';
 import { Codes, issue, type Issue } from '@/pipeline/issue-codes';
 import type { SanitizeCounts } from '@/pipeline/types';
 import { Ctx, type Lang } from './context';
+import { deobfuscate } from './deobfuscate';
 import { hostPass } from './hosts';
 import { namePass } from './names';
 import { personalPass } from './personal';
 import { secretPass } from './secrets';
 
 export type { Lang } from './context';
-export const SANITIZER_VERSION = '1.0.0';
+export const SANITIZER_VERSION = '1.1.0';
 
 export interface SanitizeResult {
   text: string;
@@ -45,6 +46,7 @@ export function loadDenyList(): string[] {
 function run(text: string, lang: Lang, denyList: string[]): { text: string; ctx: Ctx } {
   const ctx = new Ctx();
   let out = text.replace(/\r\n?/g, '\n');
+  out = deobfuscate(out, ctx);
   out = secretPass(out, ctx, lang);
   out = hostPass(out, ctx, lang);
   out = namePass(out, ctx, lang, denyList);
@@ -67,6 +69,7 @@ export function sanitize(text: string, lang: Lang = 'text', denyList: string[] =
     highlightLines.push(...hits);
     warnings.push(issue(Codes.SANITIZE_HOST_ROLE_AMBIGUOUS, `Could not tell whether this host is a source or a target; used ${ph}.`, hits[0] ?? null, { sourceLine: hits[0] }));
   }
+  if (ctx.obfuscated) warnings.push(issue(Codes.SANITIZE_OBFUSCATION_NORMALIZED, `${ctx.obfuscated} hidden item(s) were normalized before sanitizing: invisible characters removed, or an encoded e-mail address or host name decoded.`, null));
   // The sanitizer must be idempotent: a second pass over its own output changes nothing.
   const again = run(out, lang, denyList).text;
   if (again !== out) throw new Error('Sanitizer did not converge on a stable result');

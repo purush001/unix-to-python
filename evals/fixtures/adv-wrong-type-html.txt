@@ -1,0 +1,11 @@
+<!DOCTYPE html>
+<html>
+<head><title>Nightly purge report</title></head>
+<body>
+<p>select the rows; update the status; then delete from the work table;</p>
+<pre>BEGIN
+  DELETE FROM PS_NW_TMP_WORK;
+END;
+/</pre>
+</body>
+</html>

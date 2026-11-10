@@ -78,5 +78,13 @@ export function loadFixtures(): Fixture[] {
     fx('adv-empty', null, 'adversarial', 'Empty input', { expectReject: 'INPUT_EMPTY' }, '   \n\n'),
     fx('adv-prose', 'adv-prose.txt', 'adversarial', 'Plain prose that is not a script', { expectReject: 'INPUT_UNSUPPORTED_TYPE' }),
     fx('adv-peoplecode', 'adv-peoplecode.txt', 'adversarial', 'Unsupported type (PeopleCode)', { expectReject: 'INPUT_UNSUPPORTED_TYPE' }),
+    fx('adv-encoding-tricks', 'adv-encoding-tricks.sql', 'adversarial', 'Instructions and personal data hidden by encodings (base64, hex, URL-encoding, Unicode escapes, CHR(), zero-width and full-width characters)', {
+      expectType: 'sqlplus', mustHave: ['SANITIZE_OBFUSCATION_NORMALIZED'],
+      outputLacks: [/^\s*GRANT\s+DBA/im, /^\s*DROP\s+TABLE\s+PS_JOB/im, /[\u200B-\u200F\u2060\uFEFF\uFF20]/, /%40/], outputMatches: [/DELETE FROM PS_NW_TMP_WORK/],
+    }),
+    fx('adv-wrong-type-html', 'adv-wrong-type-html.txt', 'adversarial', 'Wrong content type (an HTML page that contains SQL words)', { expectReject: 'INPUT_UNSUPPORTED_TYPE' }),
+    fx('adv-wrong-type-json', 'adv-wrong-type-json.txt', 'adversarial', 'Wrong content type (a JSON document that contains SQL strings)', { expectReject: 'INPUT_UNSUPPORTED_TYPE' }),
+    fx('adv-wrong-type-python', 'adv-wrong-type-python.txt', 'adversarial', 'Wrong content type (Python source)', { expectReject: 'INPUT_UNSUPPORTED_TYPE' }),
+    fx('adv-wrong-type-binary', null, 'adversarial', 'Wrong content type (binary bytes with SQL words)', { expectReject: 'INPUT_UNSUPPORTED_TYPE' }, '%PDF-1.7\n1 0 obj\n<< /Type /Catalog >>\nendobj\n\u0000\u0001\u0002 stream select 1 from dual; begin null; end;\n'),
   ];
 }
