@@ -2,6 +2,7 @@ import { sourceFileName } from '@/agents/orchestrator';
 import { getConfig } from '@/config/env';
 import { AppError, redact } from '@/lib/errors';
 import type { Logger } from '@/lib/logger';
+import { addSpan, spanClock } from '@/lib/trace';
 import { nowIso } from '@/lib/util';
 import { ISSUE_CATALOGUE } from '@/pipeline/issue-codes';
 import type { DraftVersion, RunRecord } from '@/pipeline/types';
@@ -88,7 +89,14 @@ export async function approveRun(run: RunRecord, deps: { providers: Providers; l
     const branch = dataBranch();
     const files = commitFiles(run);
     // scan every file immediately before commit; abort on any hit
-    for (const f of files) assertClean(f.content, f.path, langOfFile(f.path));
+    const gc = spanClock();
+    try {
+      for (const f of files) assertClean(f.content, f.path, langOfFile(f.path));
+      addSpan(run, { name: 'guardrail.commit', kind: 'guardrail', startedAt: gc.startedAt, ms: Date.now() - gc.t0, attrs: { 'app.guardrail.checks': ['leak-scan'], 'app.files': files.length, 'app.guardrail.action': 'pass' } });
+    } catch (e) {
+      addSpan(run, { name: 'guardrail.commit', kind: 'guardrail', startedAt: gc.startedAt, ms: Date.now() - gc.t0, status: 'error', attrs: { 'app.guardrail.checks': ['leak-scan'], 'app.files': files.length, 'app.guardrail.action': 'blocked' } });
+      throw e;
+    }
     const res = await deps.providers.github.commitFiles({ branch, files, message: `Add conversion ${run.id} (${run.scriptType})` });
     run.save = { status: 'saved', commit: { sha: res.sha, url: res.url, branch: res.branch, path: conversionPath(run) } };
     run.state = 'saved';

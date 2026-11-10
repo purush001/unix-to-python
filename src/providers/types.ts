@@ -1,12 +1,15 @@
 import type { ConversionExample, Feedback, LogEntry, Platform, RunRecord, SkillRule } from '@/pipeline/types';
 
 // ---- LLM -------------------------------------------------------------------
-export type LlmTaskKind = 'generate' | 'repair' | 'review' | 'derive-rule';
+export type LlmTaskKind = 'generate' | 'repair' | 'review' | 'derive-rule' | 'judge';
 export interface LlmRequest {
+  /** Stable text: sent first and marked for prompt caching. */
   system: string;
   user: string;
   timeoutMs: number;
-  maxTokens?: number;
+  maxTokens: number;
+  /** Overrides LLM_MODEL (the judge pins its own model). */
+  model?: string;
   /** Structured copy of the task. Real providers ignore it; the mock works from it. */
   task: { kind: LlmTaskKind; platform: Platform; payload: Record<string, unknown> };
 }
@@ -14,7 +17,17 @@ export interface LlmResponse {
   text: string;
   status: number;
   model: string;
-  usage?: { inputTokens: number; outputTokens: number };
+  usage?: LlmUsage;
+  stopReason?: string;
+  /** How many times a paused turn was resumed. */
+  continuations?: number;
+}
+export interface LlmUsage {
+  /** Uncached input tokens. */
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens: number;
+  cacheWriteTokens: number;
 }
 export interface LlmProvider {
   readonly name: string;

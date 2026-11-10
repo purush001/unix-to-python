@@ -29,6 +29,38 @@ export interface Suggestion {
   detail: string;
 }
 
+/** The agreed "unknown" signal: a part the agent left unconverted, and what was missing. */
+export interface Unknown {
+  sourceLine: number | null;
+  missing: string;
+}
+
+export type SpanKind = 'stage' | 'llm' | 'retrieval' | 'guardrail';
+export type SpanAttr = string | number | boolean | string[] | null;
+/** One span of the run's trace (the trace ID is the run ID). */
+export interface Span {
+  id: string;
+  parentId: string | null;
+  name: string;
+  kind: SpanKind;
+  unitId: string | null;
+  startedAt: string;
+  ms: number;
+  status: 'ok' | 'error';
+  attrs: Record<string, SpanAttr>;
+}
+
+/** A judge's structured verdict, attached to the run as a score. */
+export interface JudgeScore {
+  /** Share of applicable criteria answered "yes" (0 to 1); null when none was applicable. */
+  score: number | null;
+  criteria: { id: string; verdict: 'yes' | 'no' | 'unknown'; evidence: string }[];
+  model: string;
+  promptVersion: string;
+  draftVersion: number;
+  at: string;
+}
+
 export interface SanitizeCounts {
   emails: number;
   names: number;
@@ -53,6 +85,9 @@ export interface UnitState {
   requirements: string | null;
   changes: Change[];
   suggestions: Suggestion[];
+  unknowns?: Unknown[];
+  /** Model IDs that actually answered for this unit. */
+  models?: string[];
   issues: Issue[];
   /** Pipeline-level warnings (repair/memory), kept across validations. */
   notes: Issue[];
@@ -113,6 +148,11 @@ export interface Witness {
   rulesApplied: string[];
   retrieved: { rules: string[]; examples: string[] };
   embeddingsModel: string;
+  /** Model IDs that actually answered (a fallback model shows up here). */
+  models: string[];
+  /** Version hash of each system prompt used, by role. */
+  promptVersions: Record<string, string>;
+  effort: string;
   attempts: Record<string, number>;
   transientRetries: number;
   timestamps: { received: string; completed: string };
@@ -155,6 +195,10 @@ export interface RunRecord {
   rating: { rating: number; comment: string | null; at: string } | null;
   error: { code: string; message: string; status: number } | null;
   learned: boolean;
+  /** Spans of every stage, model call, retrieval and guardrail (absent on runs stored before tracing). */
+  trace?: Span[];
+  /** Live or eval judge verdict for the latest judged draft. */
+  judge?: JudgeScore | null;
 }
 
 export interface Feedback {

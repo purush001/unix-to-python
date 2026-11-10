@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import { BASE_RULES } from '@skills/base';
 import { createLogger } from '@/lib/logger';
 import { compare, disableRule, learnTick, proposeAfterApproval, verifyCandidate } from '@/learning/loop';
-import { reindexMemory, retrieveGuidance, syncPendingMemory, TOP_EXAMPLES, TOP_RULES } from '@/learning/memory';
+import { reindexMemory, retrieveGuidance, syncPendingMemory, topExamples, topRules } from '@/learning/memory';
 import { approveRun } from '@/lib/approval';
 import { Codes } from '@/pipeline/issue-codes';
 import type { ConversionExample, SkillRule } from '@/pipeline/types';
@@ -39,14 +39,14 @@ describe('memory retrieval', () => {
 
     const r = await retrieveGuidance(p, { platform: 'plsql', tags: ['cursor-loop'], excerpt: 'FOR r IN c LOOP UPDATE PS_JOB SET x = 1; END LOOP;' });
     expect(r.warning).toBeNull();
-    expect(r.rules).toHaveLength(TOP_RULES);
-    expect(r.examples).toHaveLength(TOP_EXAMPLES);
+    expect(r.rules).toHaveLength(topRules());
+    expect(r.examples).toHaveLength(topExamples());
     expect(r.rules).not.toContain('learned-shell-1');
     for (const id of ['cand-1', 'rej-1', 'off-1']) expect(r.rules).not.toContain(id);
     const shellOnly = BASE_RULES.filter((b) => b.platform === 'shell-python').map((b) => b.id);
     expect(r.rules.some((id) => shellOnly.includes(id))).toBe(false);
     expect(r.examples).not.toContain('example-run_shell');
-    expect(r.guidance.filter((g) => g.kind === 'rule')).toHaveLength(TOP_RULES);
+    expect(r.guidance.filter((g) => g.kind === 'rule')).toHaveLength(topRules());
   });
 
   it('falls back to the base rules and warns when the memory is unavailable', async () => {

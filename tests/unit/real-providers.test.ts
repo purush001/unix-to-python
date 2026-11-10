@@ -6,13 +6,13 @@ import { createAnthropicLlm } from '@/providers/llm/real';
 
 /** The real providers are exercised against stubbed HTTP. No live service is called. */
 const sse = (events: [string, unknown][]) => new Response(events.map(([e, d]) => `event: ${e}\ndata: ${JSON.stringify(d)}\n\n`).join(''), { status: 200, headers: { 'content-type': 'text/event-stream' } });
-const message = (text: string, stop = 'end_turn') =>
+const message = (text: string, stop = 'end_turn', extra: { usage?: Record<string, number>; delta?: Record<string, unknown> } = {}) =>
   sse([
-    ['message_start', { type: 'message_start', message: { id: 'msg_1', type: 'message', role: 'assistant', model: 'claude-opus-5-5', content: [], stop_reason: null, stop_sequence: null, usage: { input_tokens: 11, output_tokens: 0 } } }],
+    ['message_start', { type: 'message_start', message: { id: 'msg_1', type: 'message', role: 'assistant', model: 'claude-opus-5-5', content: [], stop_reason: null, stop_sequence: null, usage: { input_tokens: 11, output_tokens: 0, ...extra.usage } } }],
     ['content_block_start', { type: 'content_block_start', index: 0, content_block: { type: 'text', text: '' } }],
     ['content_block_delta', { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text } }],
     ['content_block_stop', { type: 'content_block_stop', index: 0 }],
-    ['message_delta', { type: 'message_delta', delta: { stop_reason: stop, stop_sequence: null }, usage: { output_tokens: 7 } }],
+    ['message_delta', { type: 'message_delta', delta: { stop_reason: stop, stop_sequence: null, ...extra.delta }, usage: { output_tokens: 7 } }],
     ['message_stop', { type: 'message_stop' }],
   ]);
 const task = { kind: 'generate' as const, platform: 'plsql' as const, payload: {} };
@@ -25,7 +25,7 @@ beforeEach(() => {
 });
 afterEach(() => {
   vi.unstubAllGlobals();
-  for (const k of ['ANTHROPIC_API_KEY', 'GITHUB_TOKEN', 'GITHUB_REPO', 'VOYAGE_API_KEY', 'LLM_MODEL']) delete process.env[k];
+  for (const k of ['ANTHROPIC_API_KEY', 'GITHUB_TOKEN', 'GITHUB_REPO', 'VOYAGE_API_KEY', 'LLM_MODEL', 'LLM_EFFORT', 'LLM_CACHE_TTL', 'LLM_FALLBACK_BETA', 'LLM_MAX_CONTINUATIONS']) delete process.env[k];
 });
 
 describe('Anthropic provider', () => {
@@ -35,35 +35,93 @@ describe('Anthropic provider', () => {
       bodies.push(JSON.parse(init?.body ?? '{}'));
       return message('<converted>\nSELECT 1 FROM DUAL;\n</converted>');
     }));
-    const res = await createAnthropicLlm().complete({ system: 'SYS', user: 'USER', timeoutMs: 5000, task });
+    const res = await createAnthropicLlm().complete({ system: 'SYS', user: 'USER', timeoutMs: 5000, maxTokens: 1000, task });
     expect(res.text).toContain('SELECT 1 FROM DUAL;');
-    expect(res.usage).toEqual({ inputTokens: 11, outputTokens: 7 });
-    expect(bodies[0]).toMatchObject({ model: 'claude-opus-5-5', stream: true, system: 'SYS', thinking: { type: 'adaptive' }, fallbacks: 'default', messages: [{ role: 'user', content: 'USER' }] });
+    expect(res.usage).toEqual({ inputTokens: 11, outputTokens: 7, cacheReadTokens: 0, cacheWriteTokens: 0 });
+    expect(res.stopReason).toBe('end_turn');
+    expect(bodies[0]).toMatchObject({ model: 'claude-opus-5-5', stream: true, max_tokens: 1000, system: [{ type: 'text', text: 'SYS', cache_control: { type: 'ephemeral' } }], thinking: { type: 'adaptive' }, output_config: { effort: 'high' }, fallbacks: 'default', messages: [{ role: 'user', content: 'USER' }] });
+    // the request never carries tools, a forced tool choice, a thinking budget or sampling parameters
+    for (const k of ['tools', 'tool_choice', 'temperature', 'top_p', 'top_k']) expect(bodies[0]).not.toHaveProperty(k);
+  });
+
+  it('reads effort, cache lifetime, model override and the fallback switch from configuration', async () => {
+    const bodies: Record<string, unknown>[] = [];
+    const headers: Record<string, string>[] = [];
+    vi.stubGlobal('fetch', vi.fn(async (_u: unknown, init?: { body?: string; headers?: HeadersInit }) => {
+      bodies.push(JSON.parse(init?.body ?? '{}'));
+      headers.push(Object.fromEntries(new Headers(init?.headers).entries()));
+      return message('ok');
+    }));
+    process.env.LLM_EFFORT = 'low';
+    process.env.LLM_CACHE_TTL = '1h';
+    process.env.LLM_FALLBACK_BETA = 'off';
+    await createAnthropicLlm().complete({ system: 'SYS', user: 'USER', timeoutMs: 5000, maxTokens: 77, model: 'claude-sonnet-5-5', task });
+    expect(bodies[0]).toMatchObject({ model: 'claude-sonnet-5-5', max_tokens: 77, output_config: { effort: 'low' }, system: [{ cache_control: { type: 'ephemeral', ttl: '1h' } }] });
+    expect(bodies[0]).not.toHaveProperty('fallbacks');
+    expect(headers[0]['anthropic-beta'] ?? '').not.toContain('server-side-fallback');
+    process.env.LLM_CACHE_TTL = 'off';
+    await createAnthropicLlm().complete({ system: 'SYS', user: 'USER', timeoutMs: 5000, maxTokens: 77, task });
+    expect((bodies[1].system as Record<string, unknown>[])[0]).not.toHaveProperty('cache_control');
+  });
+
+  it('returns cache read and cache write tokens', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => message('ok', 'end_turn', { usage: { cache_read_input_tokens: 900, cache_creation_input_tokens: 40 } })));
+    const res = await createAnthropicLlm().complete({ system: 's', user: 'u', timeoutMs: 5000, maxTokens: 1000, task });
+    expect(res.usage).toEqual({ inputTokens: 11, outputTokens: 7, cacheReadTokens: 900, cacheWriteTokens: 40 });
+  });
+
+  it('resumes a paused turn by sending the assistant content back, sums usage, and gives up after the configured limit', async () => {
+    const bodies: { messages: { role: string }[] }[] = [];
+    let n = 0;
+    vi.stubGlobal('fetch', vi.fn(async (_u: unknown, init?: { body?: string }) => {
+      bodies.push(JSON.parse(init?.body ?? '{}'));
+      return n++ === 0 ? message('part one', 'pause_turn') : message('<converted>\ndone\n</converted>');
+    }));
+    const res = await createAnthropicLlm().complete({ system: 's', user: 'u', timeoutMs: 5000, maxTokens: 1000, task });
+    expect(res.text).toContain('done');
+    expect(res.continuations).toBe(1);
+    expect(res.usage).toMatchObject({ inputTokens: 22, outputTokens: 14 });
+    expect(bodies[1].messages.map((m) => m.role)).toEqual(['user', 'assistant']);
+    vi.stubGlobal('fetch', vi.fn(async () => message('still going', 'pause_turn')));
+    process.env.LLM_MAX_CONTINUATIONS = '1';
+    const stuck = await createAnthropicLlm().complete({ system: 's', user: 'u', timeoutMs: 5000, maxTokens: 1000, task }).catch((e) => e);
+    expect([stuck.failure, stuck.transient]).toEqual(['malformed', true]);
+  });
+
+  it('treats a tool call and an unknown stop reason as unusable replies', async () => {
+    for (const stop of ['tool_use', 'something_new']) {
+      vi.stubGlobal('fetch', vi.fn(async () => message('text', stop)));
+      const err = await createAnthropicLlm().complete({ system: 's', user: 'u', timeoutMs: 5000, maxTokens: 1000, task }).catch((e) => e);
+      expect([err.failure, err.transient]).toEqual(['malformed', true]);
+    }
   });
 
   it('maps a cut-off reply and an empty reply to transient errors, and a refusal to a non-transient one', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => message('partial', 'max_tokens')));
-    const cut = await createAnthropicLlm().complete({ system: 's', user: 'u', timeoutMs: 5000, task }).catch((e) => e);
+    const cut = await createAnthropicLlm().complete({ system: 's', user: 'u', timeoutMs: 5000, maxTokens: 1000, task }).catch((e) => e);
     expect(cut).toBeInstanceOf(ProviderError);
     expect([cut.failure, cut.transient]).toEqual(['malformed', true]);
     vi.stubGlobal('fetch', vi.fn(async () => message('   ')));
-    const empty = await createAnthropicLlm().complete({ system: 's', user: 'u', timeoutMs: 5000, task }).catch((e) => e);
+    const empty = await createAnthropicLlm().complete({ system: 's', user: 'u', timeoutMs: 5000, maxTokens: 1000, task }).catch((e) => e);
     expect([empty.failure, empty.transient]).toEqual(['empty', true]);
     vi.stubGlobal('fetch', vi.fn(async () => message('', 'refusal')));
-    const refused = await createAnthropicLlm().complete({ system: 's', user: 'u', timeoutMs: 5000, task }).catch((e) => e);
-    expect([refused.status, refused.transient]).toEqual([422, false]);
+    const refused = await createAnthropicLlm().complete({ system: 's', user: 'u', timeoutMs: 5000, maxTokens: 1000, task }).catch((e) => e);
+    expect([refused.failure, refused.status, refused.transient]).toEqual(['refusal', 422, false]);
+    vi.stubGlobal('fetch', vi.fn(async () => message('', 'refusal', { delta: { stop_details: { type: 'refusal', category: 'cyber', explanation: 'x' } } })));
+    const categorised = await createAnthropicLlm().complete({ system: 's', user: 'u', timeoutMs: 5000, maxTokens: 1000, task }).catch((e) => e);
+    expect(categorised.category).toBe('cyber');
   });
 
   it('keeps HTTP status codes and never puts the key in the error', async () => {
     for (const status of [429, 500, 529]) {
       vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ type: 'error', error: { type: 'x', message: 'key sk-ant-unit-test-key-DDDD4444 rejected' } }), { status, headers: { 'content-type': 'application/json' } })));
-      const err = await createAnthropicLlm().complete({ system: 's', user: 'u', timeoutMs: 5000, task }).catch((e) => e);
+      const err = await createAnthropicLlm().complete({ system: 's', user: 'u', timeoutMs: 5000, maxTokens: 1000, task }).catch((e) => e);
       expect(err.status).toBe(status);
       expect(err.transient).toBe(status >= 500);
       expect(String(err.message)).not.toContain('DDDD4444');
     }
     vi.stubGlobal('fetch', vi.fn(async () => { throw new TypeError('fetch failed'); }));
-    const net = await createAnthropicLlm().complete({ system: 's', user: 'u', timeoutMs: 5000, task }).catch((e) => e);
+    const net = await createAnthropicLlm().complete({ system: 's', user: 'u', timeoutMs: 5000, maxTokens: 1000, task }).catch((e) => e);
     expect([net.failure, net.transient]).toEqual(['network', true]);
   });
 });

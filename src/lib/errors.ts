@@ -22,20 +22,26 @@ export class AppError extends Error {
   }
 }
 
-export type ProviderFailure = 'malformed' | 'empty' | 'http' | 'timeout' | 'network';
+export type ProviderFailure = 'malformed' | 'empty' | 'http' | 'timeout' | 'network' | 'refusal';
 
 /** Error from an external provider. `transient` errors are retried (section 7.2). */
 export class ProviderError extends Error {
+  /** Set when a reply arrived but could not be used, so its tokens are still counted. */
+  response?: { model: string; usage?: { inputTokens: number; outputTokens: number; cacheReadTokens: number; cacheWriteTokens: number }; stopReason?: string };
   constructor(
     public provider: string,
     public failure: ProviderFailure,
     public status: number,
     message: string,
+    /** Refusals only: the provider's category, when it gave one. */
+    public category: string | null = null,
   ) {
     super(redact(message));
     this.name = 'ProviderError';
   }
   get transient(): boolean {
+    // a refusal is surfaced as a refusal and never retried blindly
+    if (this.failure === 'refusal') return false;
     return this.failure !== 'http' || this.status >= 500;
   }
 }

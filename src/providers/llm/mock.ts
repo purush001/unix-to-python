@@ -36,6 +36,16 @@ export function createMockLlm(): LlmProvider {
           if (a !== b) issues.push({ code: 'REVIEW_TXN_BOUNDARY_CHANGED', message: `The source has ${a} COMMIT/ROLLBACK statements; the draft has ${b}.`, line: null });
         }
         text = `<review>\n${JSON.stringify(issues)}\n</review>`;
+      } else if (req.task.kind === 'judge') {
+        // The mock judge decides only what it can count; everything else is "unknown", never a guessed "yes".
+        const cannot = 'The mock judge cannot evaluate this criterion.';
+        const criteria = ['F1', 'F2', 'F3', 'F4', 'F5', 'F6'].map((id) => ({ id, evidence: cannot, verdict: 'unknown' }));
+        if (req.task.platform === 'plsql') {
+          const a = count(p.source ?? '', ['COMMIT', 'ROLLBACK']);
+          const b = count(p.draft ?? '', ['COMMIT', 'ROLLBACK']);
+          criteria[1] = { id: 'F2', evidence: `The source has ${a} COMMIT/ROLLBACK statements; the draft has ${b}.`, verdict: a === b ? 'yes' : 'no' };
+        }
+        text = `<verdict>\n${JSON.stringify({ criteria })}\n</verdict>`;
       } else {
         const tags = p.tags ?? [];
         const rule = {
@@ -45,7 +55,7 @@ export function createMockLlm(): LlmProvider {
         };
         text = `<rule>\n${JSON.stringify(rule)}\n</rule>`;
       }
-      return { text, status: 200, model: 'mock', usage: { inputTokens: 0, outputTokens: 0 } };
+      return { text, status: 200, model: 'mock', stopReason: 'end_turn', usage: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 } };
     },
   };
 }

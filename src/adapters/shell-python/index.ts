@@ -2,11 +2,31 @@ import { OUTPUT_FORMAT } from '@/agents/format';
 import { Codes } from '@/pipeline/issue-codes';
 import { referenceRuntime, RUNTIME_VERSION } from './runtime';
 import { PYTHON_VALIDATOR_VERSION, validatePython } from './validators';
-import { DATA_GUARD, guidanceBlock, REVIEW_FORMAT, type PlatformAdapter } from '../types';
+import { DATA_GUARD, HONESTY_RULE, ruleIdBlock, UNKNOWN_SIGNAL_AGENT } from '@/agents/prompts';
+import { guidanceBlock, type PlatformAdapter } from '../types';
+
+const BUILTIN_RULE_IDS: Record<string, string> = {
+  'python-standard-runtime': 'standard runtime added (config file, rotating log, error capture, failure email)',
+  'set-e': 'set -e / -u / pipefail became strict mode and explicit checks',
+  'trap-to-finally': 'trap became try/finally cleanup',
+  'args-to-argparse': 'positional arguments or getopts became argparse',
+  'env-file': 'a sourced profile is not executed; variables come from the environment or the config file',
+  'sqlplus-to-oracledb': 'sqlplus heredoc runs through python-oracledb on one reused connection',
+  'spool-to-file': 'SPOOL written by a Python file writer',
+  'shell-vars-to-binds': 'shell variables inside SQL text became bind variables',
+  'ftp-to-python': 'ftp session converted to ftplib (protocol kept)',
+  'sftp-to-python': 'sftp session converted to paramiko',
+  'ssh-to-paramiko': 'ssh remote command runs through paramiko',
+  'scp-to-paramiko': 'scp replaced by paramiko SFTP',
+  'mailx-to-smtplib': 'mailx replaced by smtplib',
+  'secret-to-config': 'password, host or user read from the environment or the config file',
+  'external-program': 'program still run as an external process with subprocess.run and no shell',
+  'pipeline-kept': 'command pipeline run as chained external programs with no shell',
+  'pipeline-to-python': 'text pipeline rewritten in Python',
+  'perf-batch': 'executemany, arraysize or a reused connection or session for speed',
+};
 
 const SYSTEM = `You are shell-agent. You convert one ksh/bash/sh script (Oracle and PeopleSoft operations) into ONE Python 3.11+ script. Embedded SQL has already been converted and must be used as given.
-
-${DATA_GUARD}
 
 Rules
 1. Preserve behaviour, arguments, file outputs and the exit-code contract exactly; schedulers read the exit code. Every "exit N" in the source must be returned as N.
@@ -18,6 +38,14 @@ Rules
 7. Use this standard runtime VERBATIM (include only the helper groups you need; keep function names). You write parse_args(argv) and job(state, args) -> int:
 
 ${referenceRuntime()}
+
+${ruleIdBlock(BUILTIN_RULE_IDS)}
+
+${HONESTY_RULE}
+
+${DATA_GUARD}
+
+${UNKNOWN_SIGNAL_AGENT}
 
 ${OUTPUT_FORMAT}
 Optional extra sections: <config>…</config> and <requirements>…</requirements>.`;
@@ -34,6 +62,7 @@ const HINTS: PlatformAdapter['repairHints'] = {
   [Codes.SECRET_IN_OUTPUT]: 'Remove the literal secret; read it with get_password().',
   [Codes.SANITIZE_LEAK_DETECTED]: 'Use only the placeholders present in the source; do not introduce hosts, users, names or email addresses.',
   [Codes.SHELL_UNMAPPED_CONSTRUCT]: 'Convert the construct to Python following the mapping rules.',
+  [Codes.CHANGE_RULE_UNKNOWN]: 'Cite only a guidance id you were given, a built-in rule id, "reviewer-note" or "unspecified".',
   [Codes.REVIEW_SEMANTIC_DRIFT]: 'Make the flagged part behave exactly like the source.',
   [Codes.REVIEW_STATEMENT_LOST]: 'Restore the step the reviewer found missing.',
   [Codes.REVIEW_EXIT_CODE_CHANGED]: 'Restore the original exit code.',
@@ -43,6 +72,7 @@ const HINTS: PlatformAdapter['repairHints'] = {
 export const shellPythonAdapter: PlatformAdapter = {
   platform: 'shell-python',
   agentName: 'shell-agent',
+  builtinRuleIds: BUILTIN_RULE_IDS,
   outputExt: 'py',
   validatorVersion: `${PYTHON_VALIDATOR_VERSION}+runtime.${RUNTIME_VERSION}`,
   systemPrompt: () => SYSTEM,
@@ -50,8 +80,14 @@ export const shellPythonAdapter: PlatformAdapter = {
     `${guidanceBlock(i.guidance)}${i.generateConfig ? '\nThe user asked for a config.ini template: always return <config>.\n' : ''}${i.note ? `\nReviewer note for this revision (apply it unless it conflicts with the rules): ${i.note}\n` : ''}\nConvert this script (sqlplus heredocs already hold the converted SQL):\n<source>\n${i.source}\n</source>`,
   repairPrompt: (i) =>
     `Your previous draft failed validation. Fix every issue below and return the complete corrected script.\n\nIssues:\n${i.issues.map((x) => `- ${x.code}${x.line ? ` (line ${x.line})` : ''}: ${x.message}${HINTS[x.code] ? `\n  How to fix: ${HINTS[x.code]}` : ''}`).join('\n')}\n${guidanceBlock(i.guidance)}\n<source>\n${i.source}\n</source>\n<draft>\n${i.draft}\n</draft>`,
-  reviewPrompt: (i) =>
-    `You are an independent reviewer. You cannot edit the script. Compare the sanitized shell source with the Python draft and report only real problems: semantic drift, lost steps, changed transaction boundaries, changed exit codes. The standard runtime (logging, config, error email) is expected and is not a problem.\n${DATA_GUARD}\n\n${REVIEW_FORMAT}\n\n<source>\n${i.source}\n</source>\n<draft>\n${i.draft}\n</draft>`,
+  reviewPrompt: (i) => `Platform: ksh/bash shell converted to Python 3.11+. Review this conversion.
+
+<source>
+${i.source}
+</source>
+<draft>
+${i.draft}
+</draft>`,
   validate: async (v) => validatePython({ source: v.source, draft: v.draft }),
   repairHints: HINTS,
   parses: (issues) => !issues.some((i) => i.code === Codes.PY_SYNTAX_ERROR),

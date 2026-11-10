@@ -3,11 +3,25 @@ import { Codes } from '@/pipeline/issue-codes';
 import { captureBlock } from './blocks';
 import { COMPAT_RULES_VERSION } from './compat';
 import { PLSQL_VALIDATOR_VERSION, validatePlsql } from './validators';
-import { DATA_GUARD, guidanceBlock, REVIEW_FORMAT, type PlatformAdapter } from '../types';
+import { DATA_GUARD, HONESTY_RULE, ruleIdBlock, UNKNOWN_SIGNAL_AGENT } from '@/agents/prompts';
+import { guidanceBlock, type PlatformAdapter } from '../types';
+
+const BUILTIN_RULE_IDS: Record<string, string> = {
+  'dual-compat': 'rewrite to the form that works on every 19c release update and on 26ai',
+  'dual-select-from-dual': 'FROM DUAL added to a SELECT without FROM',
+  'desupported-feature': 'feature desupported in 26ai replaced by a form that works on both releases',
+  'desupported-clob2file': 'DBMS_XSLPROCESSOR.CLOB2FILE replaced by DBMS_LOB.CLOB2FILE',
+  'conditional-compilation': 'DBMS_DB_VERSION conditional compilation where PL/SQL has no single common form',
+  SQL_NO_COMMON_FORM: 'plain SQL with no common form: the 19c form was kept and both alternatives are described',
+  'plsql-error-capture': 'standard capture block and RAISE added to the outermost WHEN OTHERS handler',
+  'plsql-error-capture-existing-handler': 'standard capture block added to a handler the source already had',
+  'sqlplus-serveroutput': 'SET SERVEROUTPUT ON SIZE UNLIMITED added before the first statement',
+  'perf-set-based': 'row-by-row loop replaced by set-based SQL, or BULK COLLECT with LIMIT and FORALL',
+  'perf-bind-variables': 'concatenated literals in dynamic SQL replaced by bind variables',
+  'perf-predicate': 'sargable predicate, join, analytic function, MERGE or EXISTS in place of a slower form',
+};
 
 const SYSTEM = `You are sql-agent, an Oracle and PeopleSoft migration specialist. You convert one Oracle 19c SQL, PL/SQL or SQL*Plus unit so that the SAME text compiles and behaves identically on Oracle Database 19c (any release update) and Oracle AI Database 26ai.
-
-${DATA_GUARD}
 
 Rules
 1. Dual compatibility is mandatory. Allowed syntax is the intersection of both releases. Never emit syntax that exists only in 26ai or only in later 19c release updates: IF [NOT] EXISTS in DDL, SELECT without FROM DUAL, UPDATE/DELETE with a FROM join, GROUP BY on a column alias, GROUP BY ALL, QUALIFY, multi-row VALUES, the SQL BOOLEAN, VECTOR and JSON data types, SQL macros, EXCEPT, schema-level grants, annotations, and functions added after base 19c (for example ANY_VALUE, JSON_TRANSFORM, BIT_AND_AGG, CHECKSUM, UUID, DATEADD).
@@ -20,7 +34,15 @@ ${captureBlock('    ')}
     RAISE;
    Create no tables or other objects for logging. For SQL*Plus scripts put SET SERVEROUTPUT ON SIZE UNLIMITED before the first statement and keep the SPOOL. Do not add WHENEVER SQLERROR EXIT where the original continued past errors - suggest it instead.
 7. 26ai-only improvements go in <suggestions> with a title starting "After 19c is retired:". For PeopleSoft-delivered objects add that certification with PeopleTools 8.62 must be checked on My Oracle Support first. Never apply them.
-8. Every change appears in <changes> with a rule id, the output lines, a one-line summary, the reason and a risk level.
+8. Every change appears in <changes> with a rule id, the output lines, a one-line summary, the reason and a risk level. The reviewer approves from this list, so a change that is not listed is a silent change.
+
+${ruleIdBlock(BUILTIN_RULE_IDS)}
+
+${HONESTY_RULE}
+
+${DATA_GUARD}
+
+${UNKNOWN_SIGNAL_AGENT}
 
 ${OUTPUT_FORMAT}`;
 
@@ -33,6 +55,7 @@ const HINTS: PlatformAdapter['repairHints'] = {
   [Codes.SQL_SUBSTITUTION_LOST]: 'Restore the missing & substitution or : bind variable exactly as in the source.',
   [Codes.SECRET_IN_OUTPUT]: 'Remove the literal secret; use the &&db_password substitution variable or an environment reference.',
   [Codes.SANITIZE_LEAK_DETECTED]: 'Use only the placeholders present in the source; do not introduce hosts, users, names or email addresses.',
+  [Codes.CHANGE_RULE_UNKNOWN]: 'Cite only a guidance id you were given, a built-in rule id, "reviewer-note" or "unspecified".',
   [Codes.REVIEW_TXN_BOUNDARY_CHANGED]: 'Put every COMMIT and ROLLBACK back exactly where the source has it.',
   [Codes.REVIEW_SEMANTIC_DRIFT]: 'Make the flagged part behave exactly like the source.',
   [Codes.REVIEW_STATEMENT_LOST]: 'Restore the statement the reviewer found missing.',
@@ -42,6 +65,7 @@ const HINTS: PlatformAdapter['repairHints'] = {
 export const plsqlAdapter: PlatformAdapter = {
   platform: 'plsql',
   agentName: 'sql-agent',
+  builtinRuleIds: BUILTIN_RULE_IDS,
   outputExt: 'sql',
   validatorVersion: `${PLSQL_VALIDATOR_VERSION}+rules.${COMPAT_RULES_VERSION}`,
   systemPrompt: () => SYSTEM,
@@ -49,8 +73,14 @@ export const plsqlAdapter: PlatformAdapter = {
     `${i.embedded ? 'This unit is the body of a sqlplus heredoc inside a shell script. Shell variables such as $VAR or ${VAR} must stay exactly as they are.\n' : ''}${guidanceBlock(i.guidance)}${i.note ? `\nReviewer note for this revision (apply it unless it conflicts with the rules): ${i.note}\n` : ''}\nConvert this unit:\n<source>\n${i.source}\n</source>`,
   repairPrompt: (i) =>
     `Your previous draft failed validation. Fix every issue below and return the complete corrected unit.\n\nIssues:\n${i.issues.map((x) => `- ${x.code}${x.line ? ` (line ${x.line})` : ''}: ${x.message}${HINTS[x.code] ? `\n  How to fix: ${HINTS[x.code]}` : ''}`).join('\n')}\n${guidanceBlock(i.guidance)}\n<source>\n${i.source}\n</source>\n<draft>\n${i.draft}\n</draft>`,
-  reviewPrompt: (i) =>
-    `You are an independent reviewer. You cannot edit the script. Compare the sanitized source with the converted draft and report only real problems: semantic drift, lost statements, changed transaction boundaries, changed SQL*Plus exit codes. Added error-capture handlers that re-raise and SET SERVEROUTPUT ON are expected and are not problems.\n${DATA_GUARD}\n\n${REVIEW_FORMAT}\n\n<source>\n${i.source}\n</source>\n<draft>\n${i.draft}\n</draft>`,
+  reviewPrompt: (i) => `Platform: Oracle SQL, PL/SQL or SQL*Plus (the draft must run unchanged on 19c and 26ai). Review this conversion.
+
+<source>
+${i.source}
+</source>
+<draft>
+${i.draft}
+</draft>`,
   validate: async (v) => validatePlsql(v),
   repairHints: HINTS,
   parses: (issues) => !issues.some((i) => i.code === Codes.SQL_PARSE_ERROR),

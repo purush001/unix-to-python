@@ -2,7 +2,9 @@ import { ADAPTERS } from '@/adapters';
 import { hasPlsql, hasSqlplus, splitScript } from '@/adapters/plsql/splitter';
 import { embeddedSql } from '@/adapters/shell-python/shell-parser';
 import { PYTHON_SYNTAX_CHECKER } from '@/adapters/shell-python/validators';
-import { getConfigInt } from '@/config/env';
+import { getConfig, getConfigInt } from '@/config/env';
+import { makeAgent, REVIEWER_ROLE, reviewerPromptVersion } from './agent';
+import { addSpan, spanClock } from '@/lib/trace';
 import { AppError } from '@/lib/errors';
 import type { Logger } from '@/lib/logger';
 import { newRunId, nowIso, sha256 } from '@/lib/util';
@@ -63,6 +65,8 @@ function compose(shell: UnitState, sqlUnits: UnitState[]): void {
   shell.composed = true;
 }
 
+const AGENTS = { plsql: makeAgent(ADAPTERS.plsql), 'shell-python': makeAgent(ADAPTERS['shell-python']) } as const;
+
 export interface Deps {
   providers: Providers;
   log: Logger;
@@ -79,13 +83,14 @@ export interface RunLimits {
 function engineOptions(deps: Deps, limits: RunLimits): EngineOptions {
   return {
     timeoutMs: getConfigInt('PROVIDER_TIMEOUT_MS'),
-    transientRetries: 2,
+    transientRetries: getConfigInt('LLM_TRANSIENT_RETRIES'),
     retryBaseMs: limits.retryBaseMs ?? getConfigInt('RETRY_BASE_MS'),
     deadline: Date.now() + limits.budgetMs,
     onProgress: limits.onProgress,
     persist: limits.persist === false ? async () => {} : (run) => deps.providers.storage.saveRun(run),
     extraRules: limits.extraRules,
     skipMemory: limits.skipMemory,
+    maxRunTokens: getConfigInt('MAX_RUN_TOKENS'),
   };
 }
 
@@ -96,19 +101,25 @@ function engineOptions(deps: Deps, limits: RunLimits): EngineOptions {
 export async function intake(rawSource: string, selected: SelectableType, options: { generateConfig: boolean; maxRepairAttempts?: number }, deps: Deps, limits: RunLimits): Promise<RunRecord> {
   limits.onProgress?.({ type: 'stage', stage: 'intake', unitId: null, status: 'start' });
   const t0 = Date.now();
-  if (!rawSource.trim()) throw new AppError(Codes.INPUT_EMPTY, 'The input is empty.', 400);
+  const clock = spanClock();
+  // input guardrails: size, type, sanitizer. A rejection is logged by code (never by content).
+  const reject = (code: IssueCode, message: string, status: number): never => {
+    deps.log.child({ stage: 'intake' }).warn('input rejected', { code, bytes: Buffer.byteLength(rawSource, 'utf8') });
+    throw new AppError(code, message, status);
+  };
+  if (!rawSource.trim()) reject(Codes.INPUT_EMPTY, 'The input is empty.', 400);
   if (Buffer.byteLength(rawSource, 'utf8') > getConfigInt('MAX_INPUT_BYTES') || rawSource.split('\n').length > getConfigInt('MAX_INPUT_LINES')) {
-    throw new AppError(Codes.INPUT_TOO_LARGE, `The script is larger than the limit (${Math.round(getConfigInt('MAX_INPUT_BYTES') / 1024)} KB or ${getConfigInt('MAX_INPUT_LINES')} lines).`, 413);
+    reject(Codes.INPUT_TOO_LARGE, `The script is larger than the limit (${Math.round(getConfigInt('MAX_INPUT_BYTES') / 1024)} KB or ${getConfigInt('MAX_INPUT_LINES')} lines).`, 413);
   }
   const c = classify(rawSource, selected);
-  if (c.type === 'unsupported') throw new AppError(Codes.INPUT_UNSUPPORTED_TYPE, `${c.reason ?? 'This input type is not supported.'} This tool converts SQL, PL/SQL, SQL*Plus and shell scripts. Convert the wrapper script that launches the program instead.`, 422);
+  if (c.type === 'unsupported') reject(Codes.INPUT_UNSUPPORTED_TYPE, `${c.reason ?? 'This input type is not supported.'} This tool converts SQL, PL/SQL, SQL*Plus and shell scripts. Convert the wrapper script that launches the program instead.`, 422);
   const platform = platformOf(c.type);
-  let s;
+  let s: ReturnType<typeof sanitize>;
   try {
     s = sanitize(rawSource, platform === 'plsql' ? 'sql' : 'shell');
   } catch {
     // fail closed: nothing was sent anywhere
-    throw new AppError(Codes.SANITIZE_LEAK_DETECTED, 'The sanitizer could not process this script, so the run was stopped before any provider call.', 422);
+    return reject(Codes.SANITIZE_LEAK_DETECTED, 'The sanitizer could not process this script, so the run was stopped before any provider call.', 422);
   }
   const now = nowIso();
   const run: RunRecord = {
@@ -116,8 +127,10 @@ export async function intake(rawSource: string, selected: SelectableType, option
     options: { generateConfig: options.generateConfig, maxRepairAttempts: options.maxRepairAttempts ?? getConfigInt('MAX_REPAIR_ATTEMPTS') },
     inputHash: sha256(s.text), sanitizedSource: s.text, sanitization: { counts: s.counts, warnings: s.warnings, highlightLines: s.highlightLines },
     units: splitUnits(s.text, c.type), pendingNote: null, drafts: [], reviewerNotes: [], stageLog: [{ stage: 'intake', unitId: null, at: now, ms: Date.now() - t0 }],
-    final: null, save: null, rating: null, error: null, learned: false,
+    final: null, save: null, rating: null, error: null, learned: false, trace: [], judge: null,
   };
+  const replaced = Object.values(s.counts).reduce((a, b) => a + b, 0);
+  addSpan(run, { name: 'guardrail.input', kind: 'guardrail', startedAt: clock.startedAt, ms: Date.now() - clock.t0, attrs: { 'app.guardrail.checks': ['size', 'type', 'sanitizer'], 'app.router.decision': c.type, 'app.router.method': selected === 'auto' ? 'rules' : 'user-selected', 'app.sanitizer.version': SANITIZER_VERSION, 'app.sanitizer.replaced': replaced, 'app.sanitizer.warnings': s.warnings.map((w) => w.code), 'app.input.hash': run.inputHash, 'app.units': run.units.length } });
   if (limits.persist !== false) await deps.providers.storage.createRun(run);
   deps.log.child({ runId: run.id, stage: 'intake' }).info('run received', { platform, scriptType: c.type, units: run.units.length, durationMs: Date.now() - t0, replaced: s.counts });
   limits.onProgress?.({ type: 'stage', stage: 'intake', unitId: null, status: 'done', detail: c.type });
@@ -153,7 +166,10 @@ async function buildDraft(run: RunRecord, deps: Deps): Promise<DraftVersion> {
   if (mainUnit.config) files.push({ name: 'config.ini.template', kind: 'config', content: mainUnit.config });
   if (mainUnit.requirements && run.platform === 'shell-python') files.push({ name: 'requirements.txt', kind: 'requirements', content: mainUnit.requirements });
 
+  const fc = spanClock();
   const fin = await finalValidation(run, files);
+  const secretHits = fin.issues.filter((i) => i.code === Codes.SECRET_IN_OUTPUT).length;
+  addSpan(run, { name: 'guardrail.output.final', kind: 'guardrail', startedAt: fc.startedAt, ms: Date.now() - fc.t0, status: fin.afterHits || secretHits ? 'error' : 'ok', attrs: { 'app.guardrail.checks': ['leak-scan', 'secret-scan', 'syntax', 'policy-validators'], 'app.guardrail.leak_hits': fin.afterHits, 'app.guardrail.secret_hits': secretHits, 'app.issue_codes': fin.codes, 'app.files': files.map((f) => f.name) } });
   const all: Issue[] = [...run.sanitization.warnings.map((w) => ({ ...w, line: null }))];
   for (const u of run.units) {
     for (const i of unitIssues(u)) {
@@ -183,6 +199,9 @@ async function buildDraft(run: RunRecord, deps: Deps): Promise<DraftVersion> {
     rulesApplied: [...new Set(run.units.flatMap((u) => u.changes.map((c) => c.ruleId)))].sort(),
     retrieved: { rules: [...new Set(run.units.flatMap((u) => u.retrieved.rules))], examples: [...new Set(run.units.flatMap((u) => u.retrieved.examples))] },
     embeddingsModel: deps.providers.embeddings.model,
+    models: [...new Set(run.units.flatMap((u) => u.models ?? []))].sort(),
+    promptVersions: Object.fromEntries([...[...new Set(run.units.map((u) => u.platform))].map((p) => [AGENTS[p].name, AGENTS[p].promptVersion()] as [string, string]), [REVIEWER_ROLE, reviewerPromptVersion()]]),
+    effort: getConfig('LLM_EFFORT'),
     attempts: Object.fromEntries(run.units.map((u) => [u.id, u.attempts])),
     transientRetries: run.units.reduce((s, u) => s + u.transientRetries, 0),
     timestamps: { received: run.createdAt, completed: nowIso() },

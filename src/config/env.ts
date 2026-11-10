@@ -26,6 +26,31 @@ const CONFIG_DEFAULTS = {
   NODE_ENV: 'development',
   LLM_PROVIDER: 'mock', // mock | anthropic
   LLM_MODEL: 'claude-opus-5-5',
+  LLM_EFFORT: 'high', // low | medium | high | xhigh | max
+  LLM_MAX_TOKENS: '32000', // generate and repair
+  LLM_REVIEW_MAX_TOKENS: '4000',
+  LLM_RULE_MAX_TOKENS: '2000', // learning loop: rule writer
+  LLM_JUDGE_MAX_TOKENS: '4000',
+  LLM_AUX_TIMEOUT_MS: '30000', // rule writer and judge calls
+  LLM_TRANSIENT_RETRIES: '2',
+  LLM_MAX_CONTINUATIONS: '3', // how often a pause_turn reply is resumed
+  LLM_FALLBACK_BETA: 'server-side-fallback-2026-07-01', // "off" turns server-side refusal fallback off
+  LLM_CACHE_TTL: '5m', // 5m | 1h | off
+  // USD per million tokens: [input, output, cache write 5m, cache write 1h, cache read]
+  LLM_PRICES: '{"claude-opus-5-5":[4,20,5,8,0.2],"claude-fable-5-2":[8,40,10,16,0.2],"claude-sonnet-5-5":[2,10,2.5,4,0.1],"claude-haiku-5-5":[0.1,0.5,0.125,0.2,0.01],"mock":[0,0,0,0,0],"scripted":[0,0,0,0,0]}',
+  MAX_RUN_TOKENS: '1500000', // input + output tokens one run may spend before model calls stop
+  JUDGE_MODEL: 'claude-opus-5-5', // pinned separately from LLM_MODEL
+  LIVE_JUDGE_SAMPLE_PERCENT: '10', // share of finished runs the cron job scores
+  LIVE_JUDGE_BATCH: '5',
+  RETRIEVAL_TOP_RULES: '5',
+  RETRIEVAL_TOP_EXAMPLES: '2',
+  ALERT_OWNER: '', // defaults to OPS_EMAIL
+  ALERT_ERROR_RATE: '0.2', // failed runs / runs, last 24 h
+  ALERT_P95_GENERATE_MS: '120000',
+  ALERT_DAILY_COST_USD: '50',
+  ALERT_JUDGE_MIN_SCORE: '0.8', // mean live-judge score, last 24 h
+  ALERT_SAVE_FAILURES: '1', // GitHub save failures, last 24 h
+  ALERT_MIN_RUNS: '5', // rate alerts need at least this many runs
   GITHUB_PROVIDER: 'mock', // mock | github
   GITHUB_REPO: '', // owner/name
   GITHUB_DATA_BRANCH: 'conversions-data',
@@ -73,6 +98,11 @@ export function requireSecret(name: SecretName): string {
 export function getConfig(name: ConfigName): string {
   const v = process.env[name];
   return v && v.length > 0 ? v : CONFIG_DEFAULTS[name];
+}
+
+export function getConfigNumber(name: ConfigName): number {
+  const n = Number.parseFloat(getConfig(name));
+  return Number.isFinite(n) ? n : Number.parseFloat(CONFIG_DEFAULTS[name]);
 }
 
 export function getConfigInt(name: ConfigName): number {

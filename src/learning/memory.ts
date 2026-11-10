@@ -1,11 +1,13 @@
 import { BASE_RULES } from '@skills/base';
+import { getConfigInt } from '@/config/env';
 import { Codes, issue, type Issue } from '@/pipeline/issue-codes';
 import type { ConversionExample, GuidanceItem, Platform, SkillRule } from '@/pipeline/types';
 import type { MemoryRecord, Providers } from '@/providers/types';
 import { assertClean } from '@/sanitizer';
 
-export const TOP_RULES = 5;
-export const TOP_EXAMPLES = 2;
+/** Top-k is configuration (RETRIEVAL_TOP_RULES, RETRIEVAL_TOP_EXAMPLES), read at the moment of use. */
+export const topRules = (): number => getConfigInt('RETRIEVAL_TOP_RULES');
+export const topExamples = (): number => getConfigInt('RETRIEVAL_TOP_EXAMPLES');
 
 type Deps = Pick<Providers, 'memory' | 'embeddings' | 'storage'>;
 
@@ -100,20 +102,20 @@ export async function retrieveGuidance(deps: Deps, input: { platform: Platform; 
     }
     assertClean(input.excerpt, 'memory:query');
     const [embedding] = await deps.embeddings.embed([`Constructs: ${input.tags.join(', ')}\n${input.excerpt}`], 'query');
-    const rules = await deps.memory.query('skill_rules', { embedding, platform: input.platform, status: 'promoted', topK: TOP_RULES });
-    const examples = await deps.memory.query('conversion_examples', { embedding, platform: input.platform, status: 'promoted', topK: TOP_EXAMPLES });
+    const rules = await deps.memory.query('skill_rules', { embedding, platform: input.platform, status: 'promoted', topK: topRules() });
+    const examples = await deps.memory.query('conversion_examples', { embedding, platform: input.platform, status: 'promoted', topK: topExamples() });
     // candidate rules under evaluation are passed straight to the agent; they are never indexed
     const candidates = extra.filter((r) => r.platform === input.platform && (r.trigger.length === 0 || r.trigger.some((t) => input.tags.includes(t))));
     for (const c of candidates) assertClean(ruleDocument(c), `memory:${c.id}`);
     return {
       guidance: [...candidates.map((r) => ({ id: r.id, kind: 'rule' as const, text: ruleDocument(r) })), ...rules.map((h) => ({ id: h.id, kind: 'rule' as const, text: h.document })), ...examples.map((h) => ({ id: h.id, kind: 'example' as const, text: h.document }))],
-      rules: [...candidates.map((r) => r.id), ...rules.slice(0, TOP_RULES).map((h) => h.id)],
-      examples: examples.slice(0, TOP_EXAMPLES).map((h) => h.id),
+      rules: [...candidates.map((r) => r.id), ...rules.slice(0, topRules()).map((h) => h.id)],
+      examples: examples.slice(0, topExamples()).map((h) => h.id),
       warning: null,
       ms: Date.now() - t0,
     };
   } catch {
-    const base = BASE_RULES.filter((r) => r.platform === input.platform && r.trigger.some((t) => input.tags.includes(t))).slice(0, TOP_RULES);
+    const base = BASE_RULES.filter((r) => r.platform === input.platform && r.trigger.some((t) => input.tags.includes(t))).slice(0, topRules());
     return {
       guidance: base.map((r) => ({ id: r.id, kind: 'rule' as const, text: ruleDocument(r) })),
       rules: base.map((r) => r.id),
