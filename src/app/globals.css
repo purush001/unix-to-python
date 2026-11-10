@@ -764,6 +764,20 @@ textarea {
   border-right-color: transparent;
   border-radius: 50%;
 }
+.banner-fixed {
+  border-left: 8px solid var(--ok);
+  background: linear-gradient(100deg, #d1fae5, var(--surface) 70%);
+}
+.banner-fixed .banner-title {
+  color: var(--ok);
+}
+.banner-notfixed {
+  border-left: 8px solid var(--warn);
+  background: linear-gradient(100deg, #fef3c7, var(--surface) 70%);
+}
+.banner-notfixed .banner-title {
+  color: var(--warn);
+}
 .banner-error {
   border-color: var(--err);
   border-left-width: 10px;

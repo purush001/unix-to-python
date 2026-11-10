@@ -66,11 +66,26 @@ test('edit the target by hand, then remove and restore a change and a warning', 
   await page.getByTestId('edit-cancel').click();
   await expect(target).toHaveAttribute('data-readonly', 'true');
 
-  // "Ask for a fix" requests a new draft with a note built from the entry
-  const code = (await page.getByTestId('issue-item').first().locator('code').first().textContent()) ?? '';
-  await page.getByTestId('issue-fix').first().click();
+  // bring the removed warning back so every entry is listed again
+  await page.getByTestId('issues-removed').locator('summary').click();
+  await page.getByTestId('issue-restore').click();
+  await expect(page.getByTestId('issues-removed')).toHaveCount(0);
+
+  // "Ask for a fix": the page says plainly whether the entry is gone from the new draft
+  const fixable = page.getByTestId('issue-item').filter({ hasText: 'SQL_COMMIT_IN_LOOP' });
+  await fixable.getByTestId('issue-fix').click();
   await expect(page.getByTestId('draft-version')).toHaveText('version 3 of 3');
-  await expect(page.locator('.target-note')).toContainText(`Fix ${code}`);
+  await expect(page.getByTestId('fix-result')).toHaveAttribute('data-fixed', 'true');
+  await expect(page.getByTestId('fix-result')).toContainText('SQL_COMMIT_IN_LOOP is fixed in version 3');
+  await expect(page.locator('.target-note')).toContainText('Fix SQL_COMMIT_IN_LOOP');
+  await expect(page.getByTestId('issue-item').filter({ hasText: 'SQL_COMMIT_IN_LOOP' })).toHaveCount(0);
+
+  // an entry the built-in converter has no rule for is reported as not fixed
+  const stubborn = page.getByTestId('issue-item').filter({ hasText: 'SQL_ERROR_SWALLOWED' });
+  await stubborn.getByTestId('issue-fix').click();
+  await expect(page.getByTestId('draft-version')).toHaveText('version 4 of 4');
+  await expect(page.getByTestId('fix-result')).toHaveAttribute('data-fixed', 'false');
+  await expect(page.getByTestId('fix-result')).toContainText('could not fix it automatically');
 
   expect(problems).toEqual([]);
 });

@@ -144,3 +144,47 @@ describe('removing items from the change list and the feedback panel', () => {
     expect((await call('dismiss', run.id, { version: 2, kind: 'other', index: 0, dismissed: true })).status).toBe(400);
   });
 });
+
+describe('"Ask for a fix" on the built-in converter', () => {
+  const codesOf = (r: RunView) => r.drafts.at(-1)!.issues.map((i) => i.code);
+  const revise = async (id: string, note: string) => (await (await call('revise', id, { note })).json()) as RunView;
+
+  it('adds SPOOL when asked to fix SQL_OUTPUT_NOT_SPOOLED, and records the change', async () => {
+    const run = await convert(SQL);
+    expect(codesOf(run)).toContain('SQL_OUTPUT_NOT_SPOOLED');
+    const after = await revise(run.id, 'Fix SQL_OUTPUT_NOT_SPOOLED: The script does not SPOOL its output.');
+    const d = after.drafts.at(-1)!;
+    expect(codesOf(after)).not.toContain('SQL_OUTPUT_NOT_SPOOLED');
+    expect(d.files[0].content).toMatch(/^SPOOL script_output\.log$/m);
+    expect(d.files[0].content.trimEnd().endsWith('SPOOL OFF')).toBe(true);
+    expect(d.changes.some((c) => c.ruleId === 'reviewer-note' && c.summary.startsWith('SPOOL script_output.log'))).toBe(true);
+    expect(d.status).not.toBe('failed');
+  });
+
+  it('moves a COMMIT out of the loop when asked to fix SQL_COMMIT_IN_LOOP, and marks it high risk', async () => {
+    const run = await convert(SQL);
+    expect(codesOf(run)).toContain('SQL_COMMIT_IN_LOOP');
+    const after = await revise(run.id, 'Fix SQL_COMMIT_IN_LOOP at line 5: COMMIT inside a loop was kept as in the source.');
+    const d = after.drafts.at(-1)!;
+    expect(codesOf(after)).not.toContain('SQL_COMMIT_IN_LOOP');
+    expect(d.files[0].content).toMatch(/END LOOP;\n\s*COMMIT;/);
+    expect(d.files[0].content.match(/\bCOMMIT;/g)).toHaveLength(1);
+    expect(d.changes.find((c) => c.summary.startsWith('COMMIT moved'))).toMatchObject({ risk: 'high' });
+    expect(d.status).not.toBe('failed');
+  });
+
+  it('leaves a conditional COMMIT alone: that needs a person', async () => {
+    const conditional = SQL.replace('    COMMIT;', '    IF MOD(r.PROCESS_INSTANCE, 100) = 0 THEN\n      COMMIT;\n    END IF;');
+    const run = await convert(conditional);
+    const after = await revise(run.id, 'Fix SQL_COMMIT_IN_LOOP: COMMIT inside a loop was kept as in the source.');
+    expect(codesOf(after)).toContain('SQL_COMMIT_IN_LOOP');
+    expect(after.drafts.at(-1)!.files[0].content).toContain('IF MOD(r.PROCESS_INSTANCE, 100) = 0 THEN\n      COMMIT;');
+  });
+
+  it('does nothing for a code it has no rule for, and without being asked', async () => {
+    const run = await convert(SQL);
+    const first = run.drafts[0].files[0].content;
+    const after = await revise(run.id, 'Fix SQL_ERROR_SWALLOWED: please re-raise. Also tidy the layout.');
+    expect(after.drafts.at(-1)!.files[0].content).toBe(first);
+  });
+});

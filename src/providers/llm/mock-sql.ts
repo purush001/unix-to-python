@@ -8,6 +8,62 @@ export interface SqlConversion {
   suggestions: Suggestion[];
 }
 
+const SPOOL_FILE = 'script_output.log';
+
+/** Adds SPOOL before the first statement and SPOOL OFF at the end. Returns null when the script already spools. */
+function addSpool(sql: string): string | null {
+  const lines = sql.split('\n');
+  if (lines.some((l) => /^\s*spo(ol)?\s+(?!off\b)\S/i.test(l))) return null;
+  // after the leading SQL*Plus SET / WHENEVER / comment lines
+  let at = 0;
+  while (at < lines.length && /^\s*(set\s|whenever\s|--|rem\b|prompt\b|$)/i.test(lines[at])) at++;
+  lines.splice(at, 0, `SPOOL ${SPOOL_FILE}`);
+  let end = lines.length;
+  while (end > 0 && lines[end - 1].trim() === '') end--;
+  if (end > 0 && /^\s*(exit|quit)\b/i.test(lines[end - 1])) end--;
+  lines.splice(end, 0, 'SPOOL OFF');
+  return lines.join('\n');
+}
+
+/**
+ * Moves a COMMIT that stands alone on a line inside a loop to just after that loop. Leaves the
+ * script alone (returns null) when the COMMIT is conditional or shares its line with other code:
+ * those need a person.
+ */
+function commitAfterLoop(sql: string): string | null {
+  const lines = sql.split('\n');
+  const code = (l: string) => l.replace(/--.*$/, '').replace(/'(?:[^']|'')*'/g, "''");
+  const sig = (i: number, step: number) => {
+    for (let k = i + step; k >= 0 && k < lines.length; k += step) if (code(lines[k]).trim()) return code(lines[k]).trim();
+    return '';
+  };
+  let depth = 0;
+  let pending = false;
+  let moved = false;
+  const out: string[] = [];
+  for (let i = 0; i < lines.length; i++) {
+    const c = code(lines[i]);
+    const closes = (c.match(/\bend\s+loop\b/gi) ?? []).length;
+    const opens = (c.match(/\bloop\b/gi) ?? []).length - closes;
+    if (depth > 0 && /^\s*commit\s*;\s*$/i.test(c) && !/\b(then|else)$/i.test(sig(i, -1)) && !/^(end\s+if|else|elsif)\b/i.test(sig(i, 1))) {
+      pending = true;
+      moved = true;
+      continue;
+    }
+    out.push(lines[i]);
+    depth += opens;
+    depth -= closes;
+    if (closes && depth <= 0) {
+      depth = 0;
+      if (pending) {
+        out.push(`${/^\s*/.exec(lines[i])![0]}COMMIT;`);
+        pending = false;
+      }
+    }
+  }
+  return moved && !pending ? out.join('\n') : null;
+}
+
 const CERT_NOTE = 'For PeopleSoft-delivered objects, check My Oracle Support for certification with PeopleTools 8.62 before using any 26ai feature.';
 
 /**
@@ -57,7 +113,24 @@ export function mockConvertSql(source: string, opts: { embedded: boolean; note?:
     }
     out.push(text);
   }
-  const sql = out.join('\n');
+  let sql = out.join('\n');
+
+  // "Ask for a fix": the built-in converter can apply a few fixes by rule when the reviewer asks for them by code.
+  const asked = new Set([...(opts.note ?? '').matchAll(/\bFix ([A-Z][A-Z_]+)\b/g)].map((m) => m[1]));
+  if (asked.has('SQL_OUTPUT_NOT_SPOOLED') && !opts.embedded) {
+    const r = addSpool(sql);
+    if (r) {
+      sql = r;
+      changes.push({ ruleId: 'reviewer-note', lines: '1', summary: `SPOOL ${SPOOL_FILE} and SPOOL OFF added, as the reviewer asked`, reason: 'The SQL*Plus error report and the capture line now reach a log file. Check the file name and directory before use.', risk: 'low' });
+    }
+  }
+  if (asked.has('SQL_COMMIT_IN_LOOP')) {
+    const r = commitAfterLoop(sql);
+    if (r) {
+      sql = r;
+      changes.push({ ruleId: 'reviewer-note', lines: '-', summary: 'COMMIT moved from inside the loop to after END LOOP, as the reviewer asked', reason: 'This changes the transaction boundary: the work is now committed once, and a failure rolls back the whole loop. Confirm the business process allows it.', risk: 'high' });
+    }
+  }
 
   if (/\bfrom\s+dual\b/i.test(sql)) suggestions.push({ title: 'After 19c is retired: SELECT without FROM DUAL', detail: `26ai accepts SELECT expressions without FROM DUAL. Not applied: it fails on 19c. ${CERT_NOTE}` });
   if (/\b(user|all)_(tables|objects|indexes|sequences)\b/i.test(sql) && /execute\s+immediate/i.test(sql)) {
@@ -67,6 +140,6 @@ export function mockConvertSql(source: string, opts: { embedded: boolean; note?:
   if (/\bloop\b[\s\S]*?\b(insert|update|delete)\b[\s\S]*?\bend\s+loop\b/i.test(sql)) suggestions.push({ title: 'Row-by-row DML', detail: 'A loop runs DML one row at a time. A set-based statement, or BULK COLLECT … LIMIT with FORALL, would be faster on both releases. The mock provider does not rewrite loops; the real provider does.' });
   if (/execute\s+immediate[\s\S]{0,300}?\|\|/i.test(sql)) suggestions.push({ title: 'Dynamic SQL built by concatenation', detail: 'Use bind variables (EXECUTE IMMEDIATE … USING) to avoid hard parses and SQL injection. The mock provider does not rewrite dynamic SQL; the real provider does.' });
   if (/select\s+count\s*\(\s*\*\s*\)\s+into/i.test(sql)) suggestions.push({ title: 'COUNT(*) used as an existence check', detail: 'Where the count is only compared with zero, an EXISTS subquery stops at the first row.' });
-  if (opts.note) changes.push({ ruleId: 'reviewer-note', lines: '-', summary: `Reviewer note recorded: ${opts.note}`, reason: 'The mock provider cannot act on free text; the note is kept for the human reviewer and the learning loop.', risk: 'low' });
+  if (opts.note) changes.push({ ruleId: 'reviewer-note', lines: '-', summary: `Reviewer note recorded: ${opts.note}`, reason: 'The built-in converter cannot act on free text; the note is kept for the human reviewer and the learning loop.', risk: 'low' });
   return { sql, changes, suggestions };
 }

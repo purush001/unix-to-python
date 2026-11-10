@@ -62,6 +62,8 @@ export function Modernizer() {
   const [note, setNote] = useState('');
   const [statusOpen, setStatusOpen] = useState(false);
   const [toast, setToast] = useState('');
+  /** Outcome of the last "Ask for a fix": whether the entry is gone from the new draft. */
+  const [fixResult, setFixResult] = useState<{ fixed: boolean; text: string } | null>(null);
 
   const unauthorized = useCallback(() => {
     session.setToken(null);
@@ -100,7 +102,7 @@ export function Modernizer() {
 
   /** Runs one pipeline call, then resumes while the server says the run was cut off. */
   const drive = useCallback(
-    async (kind: Busy, tok: string, start: () => Promise<RunView>) => {
+    async (kind: Busy, tok: string, start: () => Promise<RunView>, after?: (r: RunView) => void) => {
       setBusy(kind);
       setError(null);
       setActiveIssue(null);
@@ -116,6 +118,7 @@ export function Modernizer() {
         adopt(r);
         const d = latestDraft(r);
         setAnnouncement(d ? `Draft version ${d.version} is ready. Status: ${STATUS_TEXT[d.status]}.` : 'The run ended without a draft.');
+        after?.(r);
       } catch (e) {
         fail(e);
         setStages((prev) => {
@@ -213,6 +216,7 @@ export function Modernizer() {
     repairSeen.current = false;
     setStages({ ...emptyStages(), intake: 'done' });
     const text = note.trim();
+    setFixResult(null);
     setNoteOpen(false);
     setNote('');
     setShowDiff(false);
@@ -229,7 +233,21 @@ export function Modernizer() {
     setNoteOpen(false);
     setEditText(null);
     setShowDiff(false);
-    void drive('revising', token, () => api.revise(token, run.id, text, onStage));
+    setFixResult(null);
+    const before = draft?.issues.filter((i) => i.code === issue.code).length ?? 0;
+    void drive('revising', token, () => api.revise(token, run.id, text, onStage), (r) => {
+      // say plainly whether the new draft still has the entry: a request is not a fix
+      const d = latestDraft(r);
+      const left = d?.issues.filter((i) => i.code === issue.code).length ?? 0;
+      const result =
+        left === 0
+          ? { fixed: true, text: `${issue.code} is fixed in version ${d?.version}. Check the diff before you approve.` }
+          : left < before
+            ? { fixed: false, text: `${issue.code}: ${before - left} of ${before} fixed in version ${d?.version}; ${left} still there. Use "Change output" on the rest to edit them yourself.` }
+            : { fixed: false, text: `${issue.code} is still there in version ${d?.version}: the converter could not fix it automatically. Use "Change output" to edit the target yourself.` };
+      setFixResult(result);
+      setAnnouncement(result.text);
+    });
   };
 
   const approve = async () => {
@@ -251,6 +269,7 @@ export function Modernizer() {
   const saveEdit = async (name: string) => {
     if (!token || !run || busy || editText === null) return;
     setBusy('saving-edit');
+    setFixResult(null);
     setError(null);
     try {
       const r = await api.edit(token, run.id, { file: name, content: editText });
@@ -292,6 +311,7 @@ export function Modernizer() {
   );
 
   const reset = () => {
+    setFixResult(null);
     setRun(null);
     session.setRunId(null);
     setSource('');
@@ -438,6 +458,17 @@ export function Modernizer() {
               </p>
             ) : null}
 
+            {fixResult && !busy ? (
+              <div className={`banner ${fixResult.fixed ? 'banner-fixed' : 'banner-notfixed'}`} role="status" data-testid="fix-result" data-fixed={fixResult.fixed ? 'true' : 'false'}>
+                <p className="banner-title">
+                  <span aria-hidden="true">{fixResult.fixed ? '✓' : '!'}</span> {fixResult.fixed ? 'Fixed' : 'Not fixed'}
+                </p>
+                <p>{fixResult.text}</p>
+                <button type="button" className="btn btn-small btn-ghost" onClick={() => setFixResult(null)}>
+                  Dismiss
+                </button>
+              </div>
+            ) : null}
             {error ? (
               <div className="banner banner-error" role="alert" data-testid="error-banner">
                 <p className="banner-title">

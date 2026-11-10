@@ -385,7 +385,13 @@ vercel build && vercel deploy --prebuilt     # preview deployment
   has to be fixed. After approval the lists are a fixed record.
 - **Change the output from the feedback panel.** Each entry has two actions. "Change output" opens
   the target editor at that entry's line so you can fix it yourself. "Ask for a fix" requests a
-  new draft with a note built from the entry (its code, line, message and next step).
+  new draft with a note built from the entry (its code, line, message and next step). The page then
+  says whether the entry is gone from the new draft ("Fixed" or "Not fixed"). On the built-in mock
+  converter only two entries are fixed by rule: `SQL_OUTPUT_NOT_SPOOLED` (adds `SPOOL
+  script_output.log` and `SPOOL OFF`) and `SQL_COMMIT_IN_LOOP` (moves a stand-alone `COMMIT` to
+  after the loop, marked high risk because it changes the transaction boundary). Everything else
+  needs the real model or a hand edit. A requested fix starts again from the sanitized source, so
+  it does not keep an earlier hand edit.
 - **Request changes** sends a note to the model and produces a new draft, as before.
 
 ## Human approval and GitHub
