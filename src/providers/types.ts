@@ -73,6 +73,8 @@ export interface Storage {
   saveRun(run: RunRecord): Promise<void>;
   getRun(id: string): Promise<RunRecord | null>;
   listRuns(limit: number): Promise<RunRecord[]>;
+  /** Deletes a run and its feedback. Returns false when there was no such run. */
+  deleteRun(id: string): Promise<boolean>;
   addFeedback(fb: Feedback): Promise<void>;
   listFeedback(limit: number): Promise<Feedback[]>;
   appendLogs(entries: LogEntry[]): Promise<void>;

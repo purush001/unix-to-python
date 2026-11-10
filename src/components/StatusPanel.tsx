@@ -9,6 +9,8 @@ interface Props {
   onUnauthorized: () => void;
   /** Changes when a run changes, so the panel reloads. */
   refreshKey: string;
+  /** Called after a run was deleted, so the page can close it if it is the one on screen. */
+  onRunDeleted: (id: string) => void;
 }
 
 const pct = (n: number) => `${(n * 100).toFixed(1)}%`;
@@ -40,7 +42,11 @@ function witnessText(w: unknown): string {
   }
 }
 
-export function StatusPanel({ token, onUnauthorized, refreshKey }: Props) {
+export function StatusPanel({ token, onUnauthorized, refreshKey, onRunDeleted }: Props) {
+  /** The run whose Delete button was pressed and is waiting for confirmation. */
+  const [confirming, setConfirming] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState<string | null>(null);
+  const [runNote, setRunNote] = useState<{ ok: boolean; text: string } | null>(null);
   const [data, setData] = useState<StatusView | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -63,6 +69,23 @@ export function StatusPanel({ token, onUnauthorized, refreshKey }: Props) {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- loading data from the server on open
     void load();
   }, [load, refreshKey]);
+
+  const deleteRun = async (id: string) => {
+    setDeleting(id);
+    setRunNote(null);
+    try {
+      const r = await api.deleteRun(token, id);
+      setRunNote({ ok: true, text: `Run ${r.id} was deleted.${r.savedCopyKept ? ' Its saved copy on GitHub was kept.' : ''}` });
+      onRunDeleted(id);
+      await load();
+    } catch (e) {
+      if (e instanceof ApiError && e.status === 401) onUnauthorized();
+      else setRunNote({ ok: false, text: e instanceof ApiError ? `${e.code}: ${e.message}` : 'The run could not be deleted.' });
+    } finally {
+      setDeleting(null);
+      setConfirming(null);
+    }
+  };
 
   const disable = async (id: string) => {
     try {
@@ -225,6 +248,12 @@ export function StatusPanel({ token, onUnauthorized, refreshKey }: Props) {
             <h3 id="st-runs" className="panel-title">
               Recent runs <span className="count">{data.runs.length}</span>
             </h3>
+            <p className="quiet">Deleting a run removes its drafts, review record and feedback from storage and cannot be undone. A copy already saved to GitHub is kept.</p>
+            {runNote ? (
+              <p className={`msg ${runNote.ok ? 'msg-ok' : 'msg-error'}`} role="status" data-testid="run-delete-note">
+                {runNote.text}
+              </p>
+            ) : null}
             {data.runs.length === 0 ? (
               <p className="quiet">No runs yet.</p>
             ) : (
@@ -240,6 +269,9 @@ export function StatusPanel({ token, onUnauthorized, refreshKey }: Props) {
                       <th scope="col">Repairs</th>
                       <th scope="col">Rating</th>
                       <th scope="col">Created</th>
+                      <th scope="col">
+                        <span className="sr-only">Actions</span>
+                      </th>
                     </tr>
                   </thead>
                   <tbody>
@@ -255,6 +287,22 @@ export function StatusPanel({ token, onUnauthorized, refreshKey }: Props) {
                         <td>{r.attempts}</td>
                         <td>{r.rating ?? '–'}</td>
                         <td>{r.createdAt.replace('T', ' ').slice(0, 19)}</td>
+                        <td className="row-actions">
+                          {confirming === r.id ? (
+                            <>
+                              <button type="button" className="btn btn-small btn-danger" onClick={() => void deleteRun(r.id)} disabled={deleting !== null} data-testid="run-delete-confirm">
+                                {deleting === r.id ? 'Deleting…' : 'Delete for good'}
+                              </button>
+                              <button type="button" className="btn btn-small btn-ghost" onClick={() => setConfirming(null)} disabled={deleting !== null}>
+                                Keep
+                              </button>
+                            </>
+                          ) : (
+                            <button type="button" className="btn btn-small btn-ghost" onClick={() => setConfirming(r.id)} disabled={deleting !== null} data-testid="run-delete">
+                              Delete<span className="sr-only"> run {r.id}</span>
+                            </button>
+                          )}
+                        </td>
                       </tr>
                     ))}
                   </tbody>

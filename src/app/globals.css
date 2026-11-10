@@ -513,6 +513,22 @@ textarea {
   background: var(--bg);
   border-color: var(--line);
 }
+.btn-danger {
+  background: var(--err);
+  border-color: var(--err);
+  color: #ffffff;
+}
+.btn-danger:hover:not(:disabled) {
+  background: #9f1239;
+  border-color: #9f1239;
+}
+.row-actions {
+  white-space: nowrap;
+  text-align: right;
+}
+.row-actions .btn + .btn {
+  margin-left: 6px;
+}
 .btn-small {
   min-height: 32px;
   padding: 3px 11px;

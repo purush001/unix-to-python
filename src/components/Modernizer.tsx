@@ -754,7 +754,15 @@ export function Modernizer() {
               {providers ? `Providers: ${Object.entries(providers).map(([k, v]) => `${k} ${v}`).join(' · ')}` : 'Runs, metrics, providers and learned rules'}
             </span>
           </section>
-          {statusOpen ? <StatusPanel token={token} onUnauthorized={unauthorized} refreshKey={`${run?.id ?? ''}:${run?.updatedAt ?? ''}`} /> : null}
+          {statusOpen ? <StatusPanel
+              token={token}
+              onUnauthorized={unauthorized}
+              refreshKey={`${run?.id ?? ''}:${run?.updatedAt ?? ''}`}
+              onRunDeleted={(id) => {
+                // the run on screen no longer exists: start clean
+                if (run?.id === id) reset();
+              }}
+            /> : null}
         </>
       )}
     </main>

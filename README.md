@@ -220,6 +220,7 @@ function: authenticate → validate (zod) → load state from storage → work �
 | `POST /api/runs/:id/approve` | Mark final, save to GitHub; call again to retry a failed save |
 | `POST /api/runs/:id/feedback` `{ rating?, comment?, errorCode?, line? }` | Rating or problem report |
 | `GET /api/runs/:id` | Stored state (page recovery) |
+| `DELETE /api/runs/:id` | Delete a run and its feedback from storage. It cannot be undone. A copy already saved to GitHub is kept, and a run that is still converting is refused (409) |
 | `GET /api/runs/:id/trace` | The run's trace: every span with tokens, cost and latency, the witness, and the attached scores. No script text |
 | `GET /api/status` | Recent runs, dashboard metrics, alerts, learned rules with witnesses |
 | `POST /api/rules/:id/disable` | A human disables a learned rule (addition to the spec) |
@@ -393,6 +394,9 @@ vercel build && vercel deploy --prebuilt     # preview deployment
   needs the real model or a hand edit. A requested fix starts again from the sanitized source, so
   it does not keep an earlier hand edit.
 - **Request changes** sends a note to the model and produces a new draft, as before.
+- **Delete a run.** In the Status view, each row of "Recent runs" has a Delete button that asks for
+  confirmation. It removes the run's drafts, review record and feedback from storage for good. It
+  does not remove a conversion already saved to GitHub, and log lines stay until the retention limit.
 
 ## Human approval and GitHub
 

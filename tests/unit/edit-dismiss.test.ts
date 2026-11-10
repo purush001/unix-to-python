@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { RunView, TraceView } from '@/lib/api-types';
+import type { RunView, StatusView, TraceView } from '@/lib/api-types';
 import { mockGitState } from '@/providers/github/mock';
+import { mockDb } from '@/providers/storage/mock';
 import { freshDb } from '../helpers';
 
 const TOKEN = 'unit-test-access-token-0001';
@@ -186,5 +187,52 @@ describe('"Ask for a fix" on the built-in converter', () => {
     const first = run.drafts[0].files[0].content;
     const after = await revise(run.id, 'Fix SQL_ERROR_SWALLOWED: please re-raise. Also tidy the layout.');
     expect(after.drafts.at(-1)!.files[0].content).toBe(first);
+  });
+});
+
+describe('deleting a run from Recent runs', () => {
+  const del = async (id: string, token = TOKEN) =>
+    (await cold('@/app/api/runs/[id]/route', 'DELETE' as 'GET'))(new Request(`http://test.local/api/runs/${id}`, { method: 'DELETE', headers: { authorization: `Bearer ${token}` } }), params(id));
+  const status = async () => (await (await (await cold('@/app/api/status/route', 'GET'))(req('/api/status'))).json()) as StatusView;
+
+  it('removes the run and its feedback from storage; other runs stay', async () => {
+    const a = await convert(SQL);
+    const b = await convert(SHELL);
+    await call('feedback', a.id, { rating: 2, comment: 'not what I wanted' });
+    expect((await status()).runs.map((r) => r.id).sort()).toEqual([a.id, b.id].sort());
+    expect(mockDb().feedback.filter((f) => f.runId === a.id)).toHaveLength(1);
+
+    const r = await del(a.id);
+    expect(r.status).toBe(200);
+    expect(await r.json()).toEqual({ id: a.id, deleted: true, savedCopyKept: false });
+    expect((await status()).runs.map((x) => x.id)).toEqual([b.id]);
+    expect(mockDb().feedback.filter((f) => f.runId === a.id)).toHaveLength(0);
+    expect((await (await cold('@/app/api/runs/[id]/route', 'GET'))(req(`/api/runs/${a.id}`), params(a.id))).status).toBe(404);
+    // deleting it again, or a run that never existed, is a 404
+    expect((await del(a.id)).status).toBe(404);
+    expect((await del('run_missing')).status).toBe(404);
+    // the deletion is logged by run id and state, never with content
+    const log = mockDb().logs.find((l) => l.msg === 'run deleted');
+    expect(log).toMatchObject({ runId: a.id, data: { state: 'draft_ready', savedToGitHub: false } });
+  });
+
+  it('needs the access token, keeps the GitHub copy of a saved run, and refuses a run that is still converting', async () => {
+    const run = await convert(SQL);
+    expect((await del(run.id, 'wrong-token')).status).toBe(401);
+    await call('approve', run.id);
+    const commits = mockGitState().commits.length;
+    const r = await del(run.id);
+    expect(await r.json()).toMatchObject({ deleted: true, savedCopyKept: true });
+    expect(mockGitState().commits).toHaveLength(commits); // nothing was removed from GitHub
+
+    const busy = await convert(SHELL);
+    const stored = mockDb().runs.get(busy.id)!;
+    mockDb().runs.set(busy.id, { ...stored, state: 'drafting', updatedAt: new Date().toISOString() });
+    const refused = await del(busy.id);
+    expect(refused.status).toBe(409);
+    expect(((await refused.json()) as { error: { code: string } }).error.code).toBe('RUN_BUSY');
+    // an abandoned "drafting" run can be deleted once it is clearly no longer running
+    mockDb().runs.set(busy.id, { ...stored, state: 'drafting', updatedAt: new Date(Date.now() - 10 * 60 * 1000).toISOString() });
+    expect((await del(busy.id)).status).toBe(200);
   });
 });
