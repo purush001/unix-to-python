@@ -158,7 +158,10 @@ describe('Python validators', () => {
   });
 
   it('rejects hosts written in the script and disabled host-key checking', async () => {
-    const hard = good().replace('    rc = 0\n', '    rc = 0\n    host = "target_server"\n').replace('paramiko.RejectPolicy()', 'paramiko.AutoAddPolicy()');
+    // a script that opens its own SSH session with host-key checking off, bypassing the shared runtime
+    const hard = good()
+      .replace('    rc = 0\n', '    rc = 0\n    host = "target_server"\n    paramiko.SSHClient().set_missing_host_key_policy(paramiko.AutoAddPolicy())\n')
+      .replace('import argparse\n', 'import argparse\nimport paramiko\n');
     const issues = (await validatePython({ source: shell, draft: hard })).filter((i) => i.code === Codes.PY_HARDCODED_ENDPOINT);
     expect(issues).toHaveLength(2);
   });

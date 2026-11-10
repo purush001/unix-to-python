@@ -115,7 +115,7 @@ export interface GuidanceItem {
 
 export interface OutputFile {
   name: string;
-  kind: 'sql' | 'python' | 'config' | 'requirements';
+  kind: 'sql' | 'python' | 'config' | 'requirements' | 'runtime';
   content: string;
 }
 

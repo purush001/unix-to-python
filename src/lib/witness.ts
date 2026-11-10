@@ -24,8 +24,8 @@ export async function verifyWitnessDir(dir: string): Promise<WitnessCheck> {
   if (!sourceName) return { ok: false, problems: ['source.sanitized.* is missing'], codes: [] };
   const source = read(sourceName);
   if (sha256(source) !== witness.inputHash) problems.push('input hash differs from the witness');
-  const order = ['target.sql', 'target.py', 'config.ini.template', 'requirements.txt'];
-  const files: OutputFile[] = order.filter((n) => names.includes(n)).map((n) => ({ name: n, kind: n.endsWith('.sql') ? 'sql' : n.endsWith('.py') ? 'python' : n.startsWith('config') ? 'config' : 'requirements', content: read(n) }));
+  const order = ['target.sql', 'target.py', 'config.ini.template', 'requirements.txt', 'script_runtime.py'];
+  const files: OutputFile[] = order.filter((n) => names.includes(n)).map((n) => ({ name: n, kind: n.endsWith('.sql') ? 'sql' : n === 'script_runtime.py' ? 'runtime' : n.endsWith('.py') ? 'python' : n.startsWith('config') ? 'config' : 'requirements', content: read(n) }));
   if (files.length === 0) return { ok: false, problems: ['no target file found'], codes: [] };
   for (const f of files) {
     if (witness.outputHashes[f.name] !== sha256(f.content)) problems.push(`hash of ${f.name} differs from the witness`);

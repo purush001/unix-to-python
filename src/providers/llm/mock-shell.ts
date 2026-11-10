@@ -1,5 +1,5 @@
 import { splitScript } from '@/adapters/plsql/splitter';
-import { configTemplate, RUNTIME_MAIN, runtimeCore, runtimeImports, type RuntimeFeatures } from '@/adapters/shell-python/runtime';
+import { configTemplate, RUNTIME_MODULE, runtimeExports, type RuntimeFeatures } from '@/adapters/shell-python/runtime';
 import { commandName, parseShell, walk, type Node, type Redirect, type Simple } from '@/adapters/shell-python/shell-parser';
 import type { Change, Suggestion } from '@/pipeline/types';
 import { buildExpr, hasGlob, isLiteral, literalValue, parseWord, placeholderSection, pyName, pyStr, type Part } from './mock-shell-words';
@@ -21,40 +21,6 @@ export interface ShellConversion {
 const KEEP_EXTERNAL = /^(psae|psdmtx|pssqr|sqr|sqrw|sqlldr|expdp|impdp|rman|exp|imp|cobrun|pscbl\.mak|PSRUN|psrun|tnsping|lsnrctl|srvctl|sqlplus|sqlplus64)$/;
 const UNMAPPED_CMD = '  # SHELL_UNMAPPED_COMMAND';
 const SECRET_VAR = /(PASSWORD|PASSWD|PASSPHRASE|SECRET|TOKEN|_PWD$|_PASS$|^PASS$|_PW$)/i;
-const FILE_HELPERS = String.raw`
-
-def remove_paths(patterns: Sequence[str], recursive: bool = False, force: bool = False) -> None:
-    for pattern in patterns:
-        matches = glob.glob(pattern)
-        if not matches and not force:
-            raise ScriptError(f"rm: no such file: {pattern}", 1)
-        for match in matches:
-            if Path(match).is_dir():
-                if not recursive:
-                    raise ScriptError(f"rm: is a directory: {match}", 1)
-                shutil.rmtree(match)
-            else:
-                Path(match).unlink()
-
-
-def copy_paths(sources: Sequence[str], dest: str, move: bool = False) -> None:
-    files = [match for source in sources for match in (glob.glob(source) or [source])]
-    for source in files:
-        if move:
-            shutil.move(source, dest)
-        else:
-            shutil.copy2(source, dest)
-    LOG.info("%s %d file(s)", "Moved" if move else "Copied", len(files))
-
-
-def gzip_paths(patterns: Sequence[str]) -> None:
-    for pattern in patterns:
-        for match in glob.glob(pattern) or [pattern]:
-            with open(match, "rb") as src, gzip.open(match + ".gz", "wb") as dst:
-                shutil.copyfileobj(src, dst)
-            Path(match).unlink()
-`;
-
 class Emitter {
   lines: string[] = [];
   depth = 1;
@@ -115,7 +81,7 @@ class Emitter {
     const name = p.name;
     if (name === '?') return 'str(rc)';
     if (name === '$') return 'str(os.getpid())';
-    if (name === '0') return 'SCRIPT_NAME';
+    if (name === '0') return 'Path(__file__).name';
     if (name === '#') return 'str(len([a for a in vars(args).values() if a and a != args.config]))';
     if (/^[1-9]$/.test(name)) {
       this.maxPositional = Math.max(this.maxPositional, Number(name));
@@ -193,6 +159,24 @@ class Emitter {
     if (withPassword) this.cfg.get(section)!.add('password');
   }
 }
+
+/** Standard-library names a job body may use, and the import each needs. */
+const STD_USES: [RegExp, string][] = [
+  [/(?<![\w.])os\./, 'import os'],
+  [/(?<![\w.])time\./, 'import time'],
+  [/(?<![\w.])glob\./, 'import glob'],
+  [/(?<![\w.])shutil\./, 'import shutil'],
+  [/(?<![\w.])gzip\./, 'import gzip'],
+  [/(?<![\w.])re\./, 'import re'],
+  [/(?<![\w.])fnmatch\./, 'import fnmatch'],
+  [/(?<![\w.])subprocess\./, 'import subprocess'],
+  [/(?<![\w.])socket\./, 'import socket'],
+  [/(?<![\w.])uuid\./, 'import uuid'],
+  [/(?<![\w.])Path\(/, 'from pathlib import Path'],
+  [/(?<![\w.])datetime\b/, 'from datetime import datetime'],
+  [/(?<![\w.])deque\(/, 'from collections import deque'],
+  [/(?<![\w.])Any\b/, 'from typing import Any'],
+];
 
 function redirOut(n: { redirects: Redirect[] }): { path: string; append: boolean } | null {
   const r = n.redirects.find((x) => x.op === '>' || x.op === '>>' || x.op === '&>');
@@ -898,7 +882,11 @@ export function mockConvertShell(source: string, opts: { generateConfig: boolean
     block(cleanup, main.trapNodes);
     main.usesFiles ||= cleanup.usesFiles;
     jobLines = ['    try:', ...main.lines.map((l) => '    ' + l), '        return rc', '    finally:', ...cleanup.lines.map((l) => '    ' + l.replace(/^(\s*)rc = step\(/, '$1step(').replace(/^(\s*)return .*$/, '$1pass'))];
-  } else jobLines = [...main.lines, '    return rc'];
+  } else {
+    // no unreachable "return rc" after a job that already ends with a return
+    const last = [...main.lines].reverse().find((l) => l.trim() !== '');
+    jobLines = last && /^ {4}return\b/.test(last) ? [...main.lines] : [...main.lines, '    return rc'];
+  }
 
   const h = header(source);
   const exits = [...new Set((source.match(/^\s*(?:.*[;&|]\s*)?exit\s+(\d+)/gm) ?? []).map((x) => Number(/(\d+)\s*$/.exec(x)![1])))].filter((x) => x !== 0).sort((a, b) => a - b);
@@ -913,10 +901,6 @@ export function mockConvertShell(source: string, opts: { generateConfig: boolean
     `Original schedule: ${h.cron.length ? h.cron.join(' | ').replace(/\\/g, '/') : 'not recorded in the source'}.`,
     '"""',
   ];
-  if (main.usesFiles) {
-    main.imports.add('import glob');
-    main.imports.add('import shutil');
-  }
   const parse = [
     '',
     '',
@@ -926,14 +910,8 @@ export function mockConvertShell(source: string, opts: { generateConfig: boolean
     ...Array.from({ length: main.maxPositional }, (_, i) => `    parser.add_argument("arg${i + 1}", nargs="?", default="", help="positional argument ${i + 1} of the original script")`),
     '    return parser.parse_args(argv)',
   ];
-  const python = [
-    '#!/usr/bin/env python3',
-    ...doc,
-    'from __future__ import annotations',
-    '',
-    runtimeImports(main.features, [...main.imports]),
-    runtimeCore(main.features).trimEnd(),
-    ...(main.usesFiles ? [FILE_HELPERS.trimEnd()] : []),
+  // The script holds only its own logic; everything else is imported from the shared runtime.
+  const bodyLines = [
     ...(main.sqlConstants.length ? ['', '', ...main.sqlConstants.flatMap((c) => [c, ''])].slice(0, -1) : []),
     ...parse,
     '',
@@ -941,12 +919,35 @@ export function mockConvertShell(source: string, opts: { generateConfig: boolean
     'def job(state: RunState, args: argparse.Namespace) -> int:',
     '    """The converted script. Returns the exit code the scheduler sees."""',
     ...jobLines,
-    RUNTIME_MAIN.trimEnd(),
+    '',
+    '',
+    'def main(argv: Optional[Sequence[str]] = None) -> int:',
+    '    return run_main(job, parse_args, argv)',
+    '',
+    '',
+    'if __name__ == "__main__":',
+    '    sys.exit(main())',
+  ];
+  const bodyText = bodyLines.join('\n');
+  const used = (re: RegExp) => re.test(bodyText);
+  const std = new Set<string>(['import argparse', 'import sys', 'from typing import Optional, Sequence', ...main.imports]);
+  for (const [re, line] of STD_USES) if (used(re)) std.add(line);
+  const fromRuntime = runtimeExports().filter((n) => new RegExp(`(?<![\\w.])${n}\\b`).test(bodyText));
+  const sortKey = (x: string) => x.replace(/^from /, 'import ');
+  const python = [
+    '#!/usr/bin/env python3',
+    ...doc,
+    'from __future__ import annotations',
+    '',
+    [...std].sort((x, y) => sortKey(x).localeCompare(sortKey(y))).join('\n'),
+    '',
+    `from ${RUNTIME_MODULE} import ${fromRuntime.join(', ')}`,
+    bodyText,
     '',
   ].join('\n');
 
   const changes: Change[] = [
-    { ruleId: 'python-standard-runtime', lines: '1', summary: 'Standard runtime added: config file, rotating log, central error capture, failure email to ops@script.com', reason: 'Every converted script reports failures the same way and keeps the original exit code.', risk: 'low' },
+    { ruleId: 'python-standard-runtime', lines: '1', summary: 'Uses the shared runtime script_runtime.py: config file, rotating log, central error capture, failure email to ops@script.com', reason: 'Every converted script reports failures the same way and keeps the original exit code. Deploy script_runtime.py next to the script.', risk: 'low' },
     ...main.changes,
   ];
   if (main.strict) changes.push({ ruleId: 'set-e', lines: '1', summary: 'set -e became strict mode (the first failing step raises)', reason: 'Same stop-on-first-error behaviour.', risk: 'low' });

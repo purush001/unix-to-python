@@ -1,12 +1,12 @@
 import { OUTPUT_FORMAT } from '@/agents/format';
 import { Codes } from '@/pipeline/issue-codes';
-import { referenceRuntime, RUNTIME_VERSION } from './runtime';
+import { RUNTIME_FILE, RUNTIME_MODULE, RUNTIME_VERSION, runtimeApi } from './runtime';
 import { PYTHON_VALIDATOR_VERSION, validatePython } from './validators';
 import { DATA_GUARD, HONESTY_RULE, ruleIdBlock, UNKNOWN_SIGNAL_AGENT } from '@/agents/prompts';
 import { guidanceBlock, type PlatformAdapter } from '../types';
 
 const BUILTIN_RULE_IDS: Record<string, string> = {
-  'python-standard-runtime': 'standard runtime added (config file, rotating log, error capture, failure email)',
+  'python-standard-runtime': 'uses the shared runtime module (config file, rotating log, error capture, failure email)',
   'set-e': 'set -e / -u / pipefail became strict mode and explicit checks',
   'trap-to-finally': 'trap became try/finally cleanup',
   'args-to-argparse': 'positional arguments or getopts became argparse',
@@ -35,9 +35,9 @@ Rules
 4. Performance: one pooled or reused database connection; executemany for batch DML; arraysize/prefetchrows for large fetches; stream files and result sets; reuse one SSH/SFTP session; compile regular expressions once; threads only for independent I/O-bound steps.
 5. No host, user or credential in the script: read them from the config file sections [source], [target], [database], [smtp], [logging]; passwords from an environment variable first, then the file. If the script needs any of them, also return a <config> section with a config.ini template whose values are placeholders (source_server, source_user, CHANGE_ME) and whose header says: chmod 600, keep out of version control, prefer Oracle Wallet or a secrets manager. Return a <requirements> section listing third-party packages.
 6. Structure: module docstring (purpose, origin, arguments, exit codes, original schedule), type hints, small functions, no global state beyond constants, main() returns the exit code, and the file ends with: if __name__ == "__main__": sys.exit(main())
-7. Use this standard runtime VERBATIM (include only the helper groups you need; keep function names). You write parse_args(argv) and job(state, args) -> int:
+7. The standard runtime is supplied as the module ${RUNTIME_MODULE} (file ${RUNTIME_FILE}), delivered next to your script. Do NOT copy, rewrite or re-implement any of it: import what you need with "from ${RUNTIME_MODULE} import ..." and keep the script to its own logic, because a short script is what the reviewer reads and the runtime is already tested. You write exactly three things: parse_args(argv) (argparse with --config), job(state, args) -> int, and main(argv=None) that returns run_main(job, parse_args, argv). Never open a database connection, an SSH session, a mail session or a log handler yourself: use db_connect/run_sql, ssh_client/sftp_client/remote_command, send_mail and LOG, so failures are captured with their line, Oracle code and exit code. This is the runtime's public interface:
 
-${referenceRuntime()}
+${runtimeApi()}
 
 ${ruleIdBlock(BUILTIN_RULE_IDS)}
 
@@ -53,10 +53,10 @@ Optional extra sections: <config>…</config> and <requirements>…</requirement
 const HINTS: PlatformAdapter['repairHints'] = {
   [Codes.PY_SYNTAX_ERROR]: 'Fix the Python syntax at the reported line; return the complete script.',
   [Codes.PY_SHELL_TRUE]: 'Replace with subprocess.run([...], shell=False, check=True, timeout=…, capture_output=True).',
-  [Codes.PY_NO_LOGGING]: 'Restore setup_logging from the standard runtime (RotatingFileHandler + StreamHandler, format with run ID and %(filename)s:%(lineno)d).',
-  [Codes.PY_NO_ERROR_EMAIL]: 'Restore send_failure_email and the main() wrapper from the standard runtime.',
-  [Codes.PY_NO_ERROR_CAPTURE]: 'Restore build_error_record / SqlError / run_command from the standard runtime.',
-  [Codes.PY_NO_CONFIG]: 'Restore load_config, get_setting and get_password; read settings through them.',
+  [Codes.PY_NO_LOGGING]: 'Import from script_runtime and let run_main set up logging; log through LOG.',
+  [Codes.PY_NO_ERROR_EMAIL]: 'main() must return run_main(job, parse_args, argv) from script_runtime; it sends the failure email.',
+  [Codes.PY_NO_ERROR_CAPTURE]: 'Use run_main, run_sql and run_command from script_runtime instead of calling oracledb or subprocess directly.',
+  [Codes.PY_NO_CONFIG]: 'Read settings through get_setting and get_password from script_runtime (state.cfg).',
   [Codes.PY_EXIT_CODE_CHANGED]: 'Return the same exit code as the shell script for the same failure.',
   [Codes.PY_HARDCODED_ENDPOINT]: 'Read the value with get_setting(state.cfg, section, key) instead of writing it in the script.',
   [Codes.SECRET_IN_OUTPUT]: 'Remove the literal secret; read it with get_password().',

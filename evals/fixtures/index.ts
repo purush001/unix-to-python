@@ -50,10 +50,10 @@ export function loadFixtures(): Fixture[] {
       expectType: 'mixed', mustNotHave: ['PY_EXIT_CODE_CHANGED'], outputMatches: [/run_command, \["sqlldr"/, /return 8/, /return 9/],
     }),
     fx('fin-ap-voucher-ftp', 'fin-ap-voucher-ftp.sh', 'golden', 'Financials: AP voucher interface file sent by ftp', {
-      expectType: 'shell', mustHave: ['SHELL_FTP_INSECURE'], mustNotHave: ['PY_EXIT_CODE_CHANGED'], outputMatches: [/ftplib/, /return 6/],
+      expectType: 'shell', mustHave: ['SHELL_FTP_INSECURE'], mustNotHave: ['PY_EXIT_CODE_CHANGED'], outputMatches: [/ftp_session\(state, "target"\)/, /ftp_put\(/, /return 6/],
     }),
     fx('dba-tablespace-check', 'dba-tablespace-check.sh', 'golden', 'DBA: nightly tablespace check that mails results with mailx', {
-      expectType: 'mixed', outputMatches: [/send_mail\(/, /finally:/],
+      expectType: 'mixed', outputMatches: [/step\(state, "send mail", send_mail,/, /finally:/],
     }),
     fx('ps-psae-launcher', 'ps-psae-launcher.sh', 'golden', 'PeopleSoft: psae Application Engine launcher with exit-code handling', {
       expectType: 'shell', mustNotHave: ['PY_EXIT_CODE_CHANGED', 'PY_SHELL_TRUE'], outputMatches: [/run_command, \["psae"/, /return 10/, /get_password\(/],

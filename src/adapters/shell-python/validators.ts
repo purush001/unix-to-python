@@ -1,8 +1,9 @@
 import { Codes, issue, type Issue } from '@/pipeline/issue-codes';
 import { parsePython, topLevelChunks, walkPy, type PyNode } from './python-parser';
+import { runtimeModule, usesRuntimeModule } from './runtime';
 import { shellExitCodes } from './shell-parser';
 
-export const PYTHON_VALIDATOR_VERSION = '1.0.0';
+export const PYTHON_VALIDATOR_VERSION = '1.1.0';
 export const PYTHON_SYNTAX_CHECKER = 'tree-sitter-python (wasm)';
 
 const lineOf = (n: PyNode) => n.startPosition.row + 1;
@@ -123,21 +124,35 @@ export async function validatePython(v: PyValidateInput): Promise<Issue[]> {
   if (!f.hasDocstring || !f.functions.has('main') || !has(/if __name__ == ["']__main__["']:\s*\n\s+sys\.exit\(main\(\)\)/)) {
     out.push(issue(Codes.PY_STRUCTURE, 'Expected a module docstring, a main() that returns the exit code, and sys.exit(main()) under the __main__ guard.', 1));
   }
-  if (!f.imports.has('logging') || !has(/RotatingFileHandler\(/) || !has(/StreamHandler\(/) || !has(/%\(lineno\)d/)) {
+
+  // The standard runtime (logging, failure email, error capture, config) comes from the shared
+  // module script_runtime.py, which this application writes itself. A script that imports it and
+  // hands its job to run_main() gets all four. A script that carries its own runtime (the earlier,
+  // self-contained form) must show each part in its own text.
+  const shared = usesRuntimeModule(text);
+  const viaRunMain = shared && f.calls.some((c) => /^(script_runtime\.)?run_main$/.test(c.name));
+  const rt = shared ? runtimeModule() : '';
+  const hasStd = (re: RegExp) => re.test(text) || (viaRunMain && re.test(rt));
+  const imp = (name: string) => f.imports.has(name) || (viaRunMain && new RegExp(`^import ${name}\\b`, 'm').test(rt));
+  const fn = (name: string) => f.functions.has(name) || (viaRunMain && new RegExp(`^def ${name}\\(`, 'm').test(rt));
+  if (shared && !viaRunMain) out.push(issue(Codes.PY_STRUCTURE, 'main() must return run_main(job, parse_args, argv) from script_runtime, so failures are captured and reported.', 1));
+  if (!imp('logging') || !hasStd(/RotatingFileHandler\(/) || !hasStd(/StreamHandler\(/) || !hasStd(/%\(lineno\)d/)) {
     out.push(issue(Codes.PY_NO_LOGGING, 'Logging must use a RotatingFileHandler and a console handler with timestamp, level, run ID, file:line and message.', 1));
   }
-  if (!f.imports.has('smtplib') || !has(/ops@script\.com/) || !has(/FAILED/) || !f.functions.has('send_failure_email')) {
+  if (!imp('smtplib') || !hasStd(/ops@script\.com/) || !hasStd(/FAILED/) || !fn('send_failure_email')) {
     out.push(issue(Codes.PY_NO_ERROR_EMAIL, 'A failure must email ops@script.com (subject: script name, FAILED, failing line, run ID).', 1));
   }
-  if (!f.functions.has('build_error_record') || !f.imports.has('traceback') || !has(/extract_tb|walk_tb|tb_lineno/)) {
+  if (!fn('build_error_record') || !imp('traceback') || !hasStd(/extract_tb|walk_tb|tb_lineno/)) {
     out.push(issue(Codes.PY_NO_ERROR_CAPTURE, 'A central handler must build an error record with the failing line number and message (build_error_record).', 1));
   }
+  // A script that talks to the database or runs a process directly (not through the runtime
+  // helpers) must capture those failures itself.
   if (f.imports.has('oracledb')) {
-    if (!has(/\boffset\b/) || !has(/full_code|\bcode\b/)) out.push(issue(Codes.PY_NO_ERROR_CAPTURE, 'Database errors must record the Oracle code, message and the offset converted to a line in the statement.', 1));
-    if (!has(/dbms_output\.enable/i) || !has(/dbms_output\.get_lines?/i)) out.push(issue(Codes.PY_NO_ERROR_CAPTURE, 'PL/SQL run from Python must enable DBMS_OUTPUT and read it after a failure.', 1));
+    if (!has(/\boffset\b/) || !has(/full_code|\bcode\b/)) out.push(issue(Codes.PY_NO_ERROR_CAPTURE, 'Database errors must record the Oracle code, message and the offset converted to a line in the statement (use run_sql from script_runtime).', 1));
+    if (!has(/dbms_output\.enable/i) || !has(/dbms_output\.get_lines?/i)) out.push(issue(Codes.PY_NO_ERROR_CAPTURE, 'PL/SQL run from Python must enable DBMS_OUTPUT and read it after a failure (use run_sql from script_runtime).', 1));
   }
-  if (f.imports.has('subprocess') && !has(/stderr/)) out.push(issue(Codes.PY_NO_ERROR_CAPTURE, 'External command failures must record the command name, exit code and the last lines of stderr.', 1));
-  if (!f.imports.has('configparser') || !has(/SCRIPT_CONFIG/) || !has(/--config/)) {
+  if (f.imports.has('subprocess') && !has(/stderr/)) out.push(issue(Codes.PY_NO_ERROR_CAPTURE, 'External command failures must record the command name, exit code and the last lines of stderr (use run_command from script_runtime).', 1));
+  if (!imp('configparser') || !hasStd(/SCRIPT_CONFIG/) || !has(/--config/)) {
     out.push(issue(Codes.PY_NO_CONFIG, 'Settings must come from the config file given by --config or SCRIPT_CONFIG.', 1));
   }
   if (f.imports.has('paramiko') && has(/AutoAddPolicy|WarningPolicy/)) {

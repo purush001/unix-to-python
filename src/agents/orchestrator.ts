@@ -1,6 +1,7 @@
 import { ADAPTERS } from '@/adapters';
 import { hasPlsql, hasSqlplus, splitScript } from '@/adapters/plsql/splitter';
 import { embeddedSql } from '@/adapters/shell-python/shell-parser';
+import { RUNTIME_FILE, runtimeModule, usesRuntimeModule } from '@/adapters/shell-python/runtime';
 import { PYTHON_SYNTAX_CHECKER } from '@/adapters/shell-python/validators';
 import { getConfig, getConfigInt } from '@/config/env';
 import { makeAgent, REVIEWER_ROLE, reviewerPromptVersion } from './agent';
@@ -183,6 +184,8 @@ async function buildDraft(run: RunRecord, deps: Deps): Promise<DraftVersion> {
   const files: OutputFile[] = [{ name: `target.${adapter.outputExt}`, kind: run.platform === 'plsql' ? 'sql' : 'python', content: mainUnit.draft ?? '' }];
   if (mainUnit.config) files.push({ name: 'config.ini.template', kind: 'config', content: mainUnit.config });
   if (mainUnit.requirements && run.platform === 'shell-python') files.push({ name: 'requirements.txt', kind: 'requirements', content: mainUnit.requirements });
+  // the shared runtime is written by this application, never by the model
+  if (run.platform === 'shell-python' && usesRuntimeModule(files[0].content)) files.push({ name: RUNTIME_FILE, kind: 'runtime', content: runtimeModule() });
 
   const fc = spanClock();
   const fin = await finalValidation(run, files);

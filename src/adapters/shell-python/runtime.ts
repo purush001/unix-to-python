@@ -1,10 +1,16 @@
 /**
- * The standard runtime every generated Python script carries (section 11):
- * config loading, rotating logs, central error capture and the failure email.
- * It is emitted verbatim by the mock converter and given to the real model as
- * the block it must reproduce, so validators and tests see one implementation.
+ * The standard runtime of every generated Python script (section 11): config loading,
+ * rotating logs, central error capture, the failure email, and the command, database,
+ * SSH, FTP, mail and file helpers.
+ *
+ * It is ONE shared module, script_runtime.py, written by this application and delivered
+ * next to each converted script. A converted script imports what it needs and holds only
+ * its own logic (parse_args, job, a three-line main). The model never writes or copies the
+ * runtime, so it cannot alter it, and a script is tens of lines instead of hundreds.
  */
-export const RUNTIME_VERSION = '1.0.0';
+export const RUNTIME_VERSION = '2.0.0';
+export const RUNTIME_FILE = 'script_runtime.py';
+export const RUNTIME_MODULE = 'script_runtime';
 
 export interface RuntimeFeatures {
   db: boolean;
@@ -14,44 +20,49 @@ export interface RuntimeFeatures {
   cmd: boolean;
 }
 
-export function runtimeImports(f: RuntimeFeatures, extra: string[] = []): string {
-  const std = new Set<string>([
-    'import argparse',
-    'import configparser',
-    'import logging',
-    'import os',
-    'import smtplib',
-    'import socket',
-    'import sys',
-    'import time',
-    'import traceback',
-    'import uuid',
-    'from collections import deque',
-    'from dataclasses import dataclass, field',
-    'from datetime import datetime',
-    'from email.message import EmailMessage',
-    'from logging.handlers import RotatingFileHandler',
-    'from pathlib import Path',
-    'from typing import Any, Callable, Optional, Sequence',
-    ...extra,
-  ]);
-  if (f.cmd) std.add('import subprocess');
-  if (f.ftp) std.add('import ftplib');
-  const third: string[] = [];
-  if (f.db) third.push('import oracledb');
-  if (f.ssh) third.push('import paramiko');
-  const sortKey = (s: string) => s.replace(/^from /, 'import ');
-  return [...std].sort((a, b) => sortKey(a).localeCompare(sortKey(b))).join('\n') + (third.length ? '\n\n' + third.join('\n') : '');
-}
+const IMPORTS = `import argparse
+import configparser
+import ftplib
+import glob
+import gzip
+import logging
+import os
+import shutil
+import smtplib
+import socket
+import subprocess
+import sys
+import time
+import traceback
+import uuid
+from collections import deque
+from dataclasses import dataclass, field
+from datetime import datetime
+from email.message import EmailMessage
+from logging.handlers import RotatingFileHandler
+from pathlib import Path
+from typing import Any, Callable, Optional, Sequence
+
+try:  # needed only by the database helpers
+    import oracledb
+except ImportError:
+    oracledb = None
+try:  # needed only by the SSH and SFTP helpers
+    import paramiko
+except ImportError:
+    paramiko = None
+`;
 
 const CORE = String.raw`
-SCRIPT_NAME = Path(__file__).name
+# The converted script that is running (run_main sets these again from the job it is given).
+SCRIPT_PATH = os.path.abspath(sys.argv[0]) if sys.argv and sys.argv[0] else "script"
+SCRIPT_NAME = Path(SCRIPT_PATH).name
 OPS_EMAIL = "ops@script.com"
 LOG_MAX_BYTES = 10 * 1024 * 1024
 LOG_BACKUP_COUNT = 5
 LOG_TAIL_LINES = 50
 
-LOG = logging.getLogger(SCRIPT_NAME)
+LOG = logging.getLogger("converted_script")
 
 
 class ScriptError(Exception):
@@ -94,6 +105,11 @@ class RunState:
     strict: bool = False
     last_error: Optional[dict[str, Any]] = None
     resources: dict[str, Any] = field(default_factory=dict)
+
+
+def _require(module: Any, name: str) -> None:
+    if module is None:
+        raise ScriptError(f"The {name} package is not installed; see requirements.txt", 2)
 
 
 def load_config(path: Optional[str]) -> configparser.ConfigParser:
@@ -152,7 +168,7 @@ def setup_logging(cfg: configparser.ConfigParser, run_id: str) -> TailHandler:
 def build_error_record(exc: BaseException) -> dict[str, Any]:
     """Line number and message first: where the script failed and why."""
     frames = traceback.extract_tb(exc.__traceback__)
-    here = os.path.abspath(__file__)
+    here = SCRIPT_PATH
     own = [f for f in frames if os.path.abspath(f.filename) == here]
     frame = own[-1] if own else (frames[-1] if frames else None)
     record: dict[str, Any] = {
@@ -306,6 +322,7 @@ class SqlError(ScriptError):
 
 def db_connect(state: RunState) -> Any:
     """One connection per run, reused by every statement."""
+    _require(oracledb, "oracledb")
     if "db" not in state.resources:
         cfg = state.cfg
         state.resources["db"] = oracledb.connect(user=get_setting(cfg, "database", "user"), password=get_password(cfg, "database", "DB_PASSWORD"), dsn=get_setting(cfg, "database", "dsn"))
@@ -372,6 +389,7 @@ const SSH = String.raw`
 
 def ssh_client(state: RunState, section: str) -> Any:
     """One SSH session per remote host, reused for every command and transfer. Host keys are verified."""
+    _require(paramiko, "paramiko")
     key = f"ssh:{section}"
     if key not in state.resources:
         cfg = state.cfg
@@ -478,8 +496,11 @@ def close_resources(state: RunState) -> None:
             LOG.debug("Closing %s failed: %s", name, exc)
 
 
-def main(argv: Optional[Sequence[str]] = None) -> int:
+def run_main(job: Callable[[RunState, argparse.Namespace], int], parse_args: Callable[..., argparse.Namespace], argv: Optional[Sequence[str]] = None) -> int:
     """Central handler: runs the job, records any failure (line number and message) and emails ops."""
+    global SCRIPT_PATH, SCRIPT_NAME
+    SCRIPT_PATH = os.path.abspath(job.__code__.co_filename)
+    SCRIPT_NAME = Path(SCRIPT_PATH).name
     args = parse_args(argv)
     run_id = uuid.uuid4().hex[:12]
     started = datetime.now()
@@ -511,21 +532,77 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     LOG.info("End %s exit_code=%d duration=%.1fs", SCRIPT_NAME, exit_code, (datetime.now() - started).total_seconds())
     return exit_code
 
-
-if __name__ == "__main__":
-    sys.exit(main())
 `;
 
-export function runtimeCore(f: RuntimeFeatures): string {
-  return CORE + (f.cmd ? CMD : '') + (f.db ? DB : '') + (f.ssh ? SSH : '') + (f.ftp ? FTP : '') + (f.mail ? MAIL : '');
-}
-export const RUNTIME_MAIN = MAIN;
+const FILE_HELPERS = String.raw`
 
-/** Full reference runtime, shown to the real model. */
-export function referenceRuntime(): string {
-  const all = { db: true, ssh: true, ftp: true, mail: true, cmd: true };
-  return `${runtimeImports(all)}\n${runtimeCore(all)}\n\n# parse_args(argv) and job(state, args) -> int are written per script.\n${MAIN}`;
+def remove_paths(patterns: Sequence[str], recursive: bool = False, force: bool = False) -> None:
+    for pattern in patterns:
+        matches = glob.glob(pattern)
+        if not matches and not force:
+            raise ScriptError(f"rm: no such file: {pattern}", 1)
+        for match in matches:
+            if Path(match).is_dir():
+                if not recursive:
+                    raise ScriptError(f"rm: is a directory: {match}", 1)
+                shutil.rmtree(match)
+            else:
+                Path(match).unlink()
+
+
+def copy_paths(sources: Sequence[str], dest: str, move: bool = False) -> None:
+    files = [match for source in sources for match in (glob.glob(source) or [source])]
+    for source in files:
+        if move:
+            shutil.move(source, dest)
+        else:
+            shutil.copy2(source, dest)
+    LOG.info("%s %d file(s)", "Moved" if move else "Copied", len(files))
+
+
+def gzip_paths(patterns: Sequence[str]) -> None:
+    for pattern in patterns:
+        for match in glob.glob(pattern) or [pattern]:
+            with open(match, "rb") as src, gzip.open(match + ".gz", "wb") as dst:
+                shutil.copyfileobj(src, dst)
+            Path(match).unlink()
+`;
+
+
+/** The complete text of script_runtime.py. Deterministic: the same for every conversion. */
+export function runtimeModule(): string {
+  const doc = `"""Shared runtime for scripts converted by Script Modernizer (version ${RUNTIME_VERSION}).
+
+Keep this file next to the converted scripts. Each script imports what it needs from it:
+config loading (--config or SCRIPT_CONFIG), rotating logs, central error capture with the
+failing line, the failure email to ops, and the command, database, SSH, FTP, mail and file
+helpers. Do not edit it per script; replace it as a whole when a newer version is delivered.
+"""`;
+  return `${doc}\nfrom __future__ import annotations\n\n${IMPORTS}${CORE}${CMD}${DB}${SSH}${FTP}${MAIL}${FILE_HELPERS}${MAIN}`.replace(/\n{4,}/g, '\n\n\n').trimEnd() + '\n';
 }
+
+/** Every public name a converted script may import from the runtime. */
+export function runtimeExports(): string[] {
+  const names = new Set<string>();
+  for (const m of runtimeModule().matchAll(/^(?:def|class) ([A-Za-z]\w*)|^([A-Z][A-Z_]+) = /gm)) names.add(m[1] ?? m[2]);
+  return [...names].sort();
+}
+
+/** Signatures and one-line descriptions, shown to the model in place of the runtime's body. */
+export function runtimeApi(): string {
+  const lines = runtimeModule().split('\n');
+  const out: string[] = [];
+  for (let i = 0; i < lines.length; i++) {
+    const m = /^(def|class) ([A-Za-z]\w*)/.exec(lines[i]);
+    if (!m) continue;
+    const doc = /^\s+"""(.*?)(?:"""|$)/.exec(lines[i + 1] ?? '');
+    out.push(`${lines[i].replace(/:\s*$/, '')}${doc ? `  # ${doc[1]}` : ''}`);
+  }
+  return ['LOG  # the logger; SCRIPT_NAME, OPS_EMAIL are constants', ...out].join('\n');
+}
+
+/** True when a script uses the shared runtime (the current form). */
+export const usesRuntimeModule = (python: string): boolean => /^\s*(?:from script_runtime import|import script_runtime\b)/m.test(python);
 
 export function configTemplate(sections: Map<string, Set<string>>): string {
   const order = ['source', 'target', 'database', 'smtp', 'logging', 'env'];
