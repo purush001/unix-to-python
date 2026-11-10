@@ -1,5 +1,5 @@
 import { Codes, issue, type Issue } from '@/pipeline/issue-codes';
-import { parsePython, walkPy, type PyNode } from './python-parser';
+import { parsePython, topLevelChunks, walkPy, type PyNode } from './python-parser';
 import { shellExitCodes } from './shell-parser';
 
 export const PYTHON_VALIDATOR_VERSION = '1.0.0';
@@ -21,7 +21,7 @@ export interface PyFacts {
 }
 
 export async function pythonFacts(source: string): Promise<PyFacts> {
-  const { root, release } = await parsePython(source);
+  const { root, parse, release } = await parsePython(source);
   try {
     const f: PyFacts = { syntaxErrors: [], calls: [], keywordArgs: [], imports: new Set(), functions: new Set(), intLiteralsInExits: new Set(), strings: [], comments: [], hasDocstring: false };
     const first = root.namedChildren.find((c) => c && c.type !== 'comment');
@@ -31,12 +31,26 @@ export async function pythonFacts(source: string): Promise<PyFacts> {
         if (x.type === 'integer' && /^\d+$/.test(x.text)) f.intLiteralsInExits.add(Number(x.text));
       });
     };
-    walkPy(root, (n) => {
-      if (n.type === 'ERROR' || n.isMissing) {
-        const near = n.isMissing ? `missing ${n.type}` : `unexpected ${JSON.stringify(n.text.split('\n')[0].slice(0, 40))}`;
-        if (f.syntaxErrors.length < 20) f.syntaxErrors.push(issue(Codes.PY_SYNTAX_ERROR, `Python syntax error: ${near}`, lineOf(n), { column: colOf(n) }));
-        return;
+    if (root.hasError) {
+      // locate each error inside its own top-level definition: far more precise than the whole-module tree
+      for (const chunk of topLevelChunks(source)) {
+        const sub = parse(chunk.text);
+        if (!sub || !sub.hasError) continue;
+        let best: PyNode | null = null;
+        walkPy(sub, (n) => {
+          if (!(n.type === 'ERROR' || n.isMissing)) return;
+          // the earliest error is where the reader should look first
+          if (!best || n.startIndex < best.startIndex) best = n;
+        });
+        const b = best as PyNode | null;
+        if (!b) continue;
+        const near = b.isMissing ? `missing ${b.type}` : `unexpected ${JSON.stringify(b.text.split('\n')[0].slice(0, 40))}`;
+        if (f.syntaxErrors.length < 20) f.syntaxErrors.push(issue(Codes.PY_SYNTAX_ERROR, `Python syntax error: ${near}`, chunk.startLine + b.startPosition.row, { column: b.startPosition.column + 1 }));
       }
+      if (f.syntaxErrors.length === 0) f.syntaxErrors.push(issue(Codes.PY_SYNTAX_ERROR, 'Python syntax error', 1, { column: 1 }));
+    }
+    walkPy(root, (n) => {
+      if (n.type === 'ERROR' || n.isMissing) return;
       switch (n.type) {
         case 'comment':
           f.comments.push({ text: n.text, line: lineOf(n) });

@@ -4,7 +4,8 @@ const HOSTNAME = /^[A-Za-z0-9][A-Za-z0-9.-]*$/;
 const TLD = String.raw`(?:com|net|org|edu|gov|mil|int|local|lan|corp|internal|intranet|priv|cloud|io|biz|info|co|ac)(?:\.[a-z]{2})?`;
 const FQDN_RE = new RegExp(String.raw`(?<![\w.@/-])((?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+${TLD})(?![\w-]|\.[a-z])`, 'gi');
 const IPV4_RE = /(?<![\w.])((?:25[0-5]|2[0-4]\d|1?\d?\d)(?:\.(?:25[0-5]|2[0-4]\d|1?\d?\d)){3})(?![\w]|\.\d)/g;
-const SAFE_HOSTS = /^(localhost|127\.0\.0\.1|0\.0\.0\.0|255\.255\.255\.\d+|script\.com)$/i;
+// github.com is where approved conversions are committed; commit links are application metadata, not script content
+const SAFE_HOSTS = /^(localhost|127\.0\.0\.1|0\.0\.0\.0|255\.255\.255\.\d+|script\.com|github\.com)$/i;
 
 const OPTS_WITH_ARG: Record<string, RegExp> = {
   ssh: /^-[iopFJbcemSWwLRDlE]$/,
@@ -195,6 +196,7 @@ function structuredPass(text: string, ctx: Ctx, lang: Lang): string {
     if (names < 2) {
       if (!twoPartTld && !/^(com|net|org|edu|gov|mil)$/.test(tld)) return m;
       if (host !== host.toLowerCase()) return m;
+      if (labels[0].length < 4 && !/[\d-]/.test(labels[0])) return m; // a.net, jrn.org: table alias and column
       if (lang === 'sql') {
         const lineStart = out.lastIndexOf('\n', offset) + 1;
         if ((out.slice(lineStart, offset).match(/'/g) ?? []).length % 2 === 0) return m;

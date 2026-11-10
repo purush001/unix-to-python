@@ -140,6 +140,8 @@ export function variableCheck(source: string, draft: string): Issue[] {
     const m = new Map<string, number>();
     for (const t of code(tokenize(text).tokens)) {
       if (t.type === 'subst') m.set('&' + t.text.replace(/^&+/, '').replace(/\.$/, '').toLowerCase(), t.line);
+      // SQL*Plus also substitutes inside string literals
+      if (t.type === 'string') for (const x of t.text.matchAll(/&&?([A-Za-z0-9_]+)/g)) m.set('&' + x[1].toLowerCase(), t.line);
       if (t.type === 'bind') m.set(t.text.toLowerCase(), t.line);
     }
     return m;

@@ -42,7 +42,16 @@ export class Ctx {
 
   host(original: string, role: Role | 'ambiguous'): string {
     const key = original.toLowerCase();
-    const hit = this.hosts.get(key);
+    let hit = this.hosts.get(key);
+    if (!hit && !/^\d+(\.\d+){3}$/.test(key)) {
+      // a short name and its fully qualified name are the same machine
+      const short = key.split('.')[0];
+      for (const [k, ph] of this.hosts) {
+        if (/^\d+(\.\d+){3}$/.test(k)) continue;
+        if (k.split('.')[0] === short && (k.includes('.') !== key.includes('.') || k === key)) hit = ph;
+      }
+      if (hit) this.hosts.set(key, hit);
+    }
     if (hit) return hit;
     const ph = this.next(role === 'source' ? 'source_server' : 'target_server');
     if (role === 'ambiguous') this.ambiguous.add(ph);
@@ -74,6 +83,19 @@ export class Ctx {
     }
     for (const k of keys) if (!this.names.has(k)) this.names.set(k, ph);
     return ph;
+  }
+  /** Renumbers dev1, dev2, … by where each person first appears in the text. */
+  renumberNames(text: string): void {
+    const lower = text.toLowerCase();
+    const first = new Map<string, number>();
+    for (const [variant, ph] of this.names) {
+      const at = lower.indexOf(variant);
+      if (at === -1) continue;
+      first.set(ph, Math.min(first.get(ph) ?? Infinity, at));
+    }
+    const order = [...new Set(this.names.values())].sort((a, b) => (first.get(a) ?? Infinity) - (first.get(b) ?? Infinity));
+    const renamed = new Map(order.map((ph, i) => [ph, `dev${i + 1}`]));
+    for (const [variant, ph] of this.names) this.names.set(variant, renamed.get(ph)!);
   }
   knownNames(): [string, string][] {
     return [...this.names.entries()].sort((a, b) => b[0].length - a[0].length);

@@ -75,6 +75,7 @@ function harvest(text: string, ctx: Ctx, denyList: string[]): string[] {
 
 export function namePass(text: string, ctx: Ctx, _lang: Lang, denyList: string[]): string {
   const weak = harvest(text, ctx, denyList);
+  ctx.renumberNames(text);
   let out = text;
 
   // 1. emails (user@host forms in transfer commands were already handled by the host pass)
@@ -88,7 +89,7 @@ export function namePass(text: string, ctx: Ctx, _lang: Lang, denyList: string[]
   for (const [name, ph] of ctx.knownNames()) {
     if (name.length < 3) continue;
     const multi = /[\s.,_]/.test(name);
-    const re = new RegExp(String.raw`(?<![\w.@-])${escapeRe(name).replace(/\\?\s+/g, String.raw`\s+`)}(?![\w@]|\.\w|-\w)`, multi ? 'gi' : 'g');
+    const re = new RegExp(String.raw`(?<![\w.@-])${escapeRe(name).replace(/\\?\s+/g, String.raw`\s+`)}(?![\w@]|\.\w|-\w)`, 'gi');
     out = out.replace(re, ph);
     if (!multi) {
       // single tokens also appear capitalised differently in paths and comments
