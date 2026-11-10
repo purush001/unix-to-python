@@ -47,6 +47,7 @@
     "verify-witness": "tsx scripts/verify-witness.ts",
     "reindex-memory": "tsx scripts/reindex-memory.ts",
     "db:migrate": "tsx scripts/migrate.ts",
-    "audit": "npm audit --audit-level=moderate"
+    "audit": "npm audit --audit-level=moderate",
+    "vercel-build": "tsx scripts/migrate.ts --if-configured && npm run build"
   }
 }

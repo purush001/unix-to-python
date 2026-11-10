@@ -9,7 +9,10 @@ import type { Storage } from '../types';
  * request, closed by close() before the function returns.
  */
 export function createSupabaseStorage(): Storage {
-  const sql = postgres(requireSecret('POSTGRES_URL'), { prepare: false, max: 1, idle_timeout: 5, connect_timeout: 10, onnotice: () => {} });
+  const url = requireSecret('POSTGRES_URL');
+  // hosted Postgres requires TLS; a local database (development, tests) does not offer it
+  const local = /@(localhost|127\.0\.0\.1)[:/]/.test(url);
+  const sql = postgres(url, { prepare: false, max: 1, idle_timeout: 5, connect_timeout: 10, onnotice: () => {}, ...(local ? {} : { ssl: 'require' as const }) });
   const j = (v: unknown) => sql.json(v as never);
   return {
     name: 'supabase',

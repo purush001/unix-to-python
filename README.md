@@ -311,7 +311,9 @@ vercel build && vercel deploy --prebuilt     # preview deployment
    transaction mode, port 6543) and other variables. The app uses **only** `POSTGRES_URL`. The
    `NEXT_PUBLIC_SUPABASE_*` variables the integration adds are not used; the browser never talks to
    Supabase. Supabase Auth, Storage, Realtime and Edge Functions are not used.
-2. Apply the schema: `POSTGRES_URL=… npm run db:migrate` (for DDL prefer the non-pooled URL).
+2. Apply the schema. On Vercel this happens automatically: the `vercel-build` script runs the
+   migrations before `next build` whenever `STORAGE_PROVIDER=supabase` (it uses
+   `POSTGRES_URL_NON_POOLING` when present). By hand: `POSTGRES_URL=… npm run db:migrate`.
 3. **Row Level Security** is enabled on every table and no policies are created, so the publishable
    key grants nothing. The server connects as the table owner through the pooled string, with
    prepared statements off (`prepare: false`), which the transaction pooler requires.

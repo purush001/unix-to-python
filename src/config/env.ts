@@ -16,6 +16,7 @@ export const SECRET_NAMES = [
   'SMTP_USER',
   'SMTP_PASSWORD',
   'POSTGRES_URL',
+  'POSTGRES_URL_NON_POOLING',
   'CHROMA_API_KEY',
   'VOYAGE_API_KEY',
 ] as const;

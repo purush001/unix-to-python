@@ -1,11 +1,21 @@
 import { readdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import postgres from 'postgres';
-import { requireSecret } from '@/config/env';
+import { getConfig, getSecret, requireSecret } from '@/config/env';
 
-/** npm run db:migrate — applies supabase/migrations/*.sql in order. Needs POSTGRES_URL (use the non-pooled URL for DDL if you have one). */
+/**
+ * npm run db:migrate — applies supabase/migrations/*.sql in order.
+ * Uses POSTGRES_URL_NON_POOLING when set (better for DDL), otherwise POSTGRES_URL.
+ * With --if-configured (used by the Vercel build) it does nothing unless STORAGE_PROVIDER=supabase.
+ */
 async function main(): Promise<void> {
-  const sql = postgres(requireSecret('POSTGRES_URL'), { prepare: false, max: 1, onnotice: () => {} });
+  if (process.argv.includes('--if-configured') && (getConfig('STORAGE_PROVIDER') !== 'supabase' || !getSecret('POSTGRES_URL'))) {
+    console.log('Storage is not Supabase: no migration to apply.');
+    return;
+  }
+  const url = getSecret('POSTGRES_URL_NON_POOLING') ?? requireSecret('POSTGRES_URL');
+  const local = /@(localhost|127\.0\.0\.1)[:/]/.test(url);
+  const sql = postgres(url, { prepare: false, max: 1, onnotice: () => {}, ...(local ? {} : { ssl: 'require' as const }) });
   try {
     await sql`create table if not exists schema_migrations (name text primary key, applied_at timestamptz not null default now())`;
     await sql`alter table schema_migrations enable row level security`;
