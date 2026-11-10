@@ -52,6 +52,8 @@ const CONFIG_DEFAULTS = {
   DENYLIST_PATH: '',
   EVAL_REAL_PROVIDER: '',
   CRON_BATCH_SIZE: '2',
+  LOG_TO_STDOUT: '',
+  RETRY_BASE_MS: '400',
 } as const;
 export type ConfigName = keyof typeof CONFIG_DEFAULTS;
 

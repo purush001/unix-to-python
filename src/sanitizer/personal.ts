@@ -57,7 +57,8 @@ export function personalPass(text: string, ctx: Ctx, lang: Lang): string {
 
     function fix(v: string): string {
       const core = v.replace(/[%_]+$/, '').replace(/^[%]+/, '');
-      if (core.trim() === '' || isReference(core) || isSynthetic(core)) return v;
+      // concatenated dynamic SQL ('''' || p_emplid || '''') is code, not a literal value
+      if (core.trim() === '' || isReference(core) || isSynthetic(core) || /\|\||''/.test(v)) return v;
       return v.replace(core, synth(kind, core, ctx));
     }
   });

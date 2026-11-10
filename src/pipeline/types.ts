@@ -66,6 +66,10 @@ export interface UnitState {
   guidance: GuidanceItem[];
   stageCodes: Partial<Record<StageName, IssueCode[]>>[];
   firstDraft: string | null;
+  reviewIssues: Issue[];
+  lastReviewCodes: IssueCode[] | null;
+  /** Shell units: true once embedded SQL drafts were spliced into the source. */
+  composed: boolean;
 }
 
 export interface GuidanceItem {

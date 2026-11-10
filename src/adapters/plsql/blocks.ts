@@ -148,7 +148,8 @@ export function instrumentUnit(text: string, type: PlsqlType): Instrumented {
       if (!b.reraises) swallowed.push(a.toks[b.othersThen].line);
       if (!b.hasCapture && (owned.has(b) || !b.reraises)) {
         const then = a.toks[b.othersThen];
-        edits.push({ at: then.end, insert: '\n' + captureBlock(ind + '    '), line: then.line, kind: 'capture' });
+        const restOfLine = text.slice(then.end, text.indexOf('\n', then.end) === -1 ? text.length : text.indexOf('\n', then.end));
+        edits.push({ at: then.end, insert: '\n' + captureBlock(ind + '    ') + (restOfLine.trim() ? `\n${ind}   ` : ''), line: then.line, kind: 'capture' });
       }
       continue;
     }

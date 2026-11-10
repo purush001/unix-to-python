@@ -198,7 +198,7 @@ def send_failure_email(state: RunState, record: dict[str, Any], exit_code: int) 
             format_error_record(record),
             "",
             f"exit code: {exit_code}",
-            f"host: {cfg.get('source', 'host', fallback='source_server')}",
+            f"host: {cfg.get('source', 'host', fallback=socket.gethostname())}",
             f"started: {state.started.isoformat(timespec='seconds')}",
             f"ended: {datetime.now().isoformat(timespec='seconds')}",
             "",

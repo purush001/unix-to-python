@@ -184,8 +184,24 @@ function structuredPass(text: string, ctx: Ctx, lang: Lang): string {
     if (/(product\/|version\s*[:=]?\s*|release\s*[:=]?\s*|\bv|\/)$/i.test(before) && !/:\/\/$/.test(before)) return m;
     return ctx.host(ip, 'ambiguous');
   });
-  // any remaining fully qualified name
-  out = out.replace(FQDN_RE, (m, host: string) => (SAFE_HOSTS.test(host) || HOST_PH.test(host) ? m : ctx.host(host, 'ambiguous')));
+  // any remaining fully qualified name. Dotted identifiers in code look like host names, so a
+  // two-label name must use a classic TLD and, in SQL, sit inside a string literal.
+  out = out.replace(FQDN_RE, (m, host: string, offset: number) => {
+    if (SAFE_HOSTS.test(host) || HOST_PH.test(host)) return m;
+    const labels = host.split('.');
+    const tld = labels[labels.length - 1].toLowerCase();
+    const twoPartTld = labels.length >= 3 && /^(co|com|ac|org|net|gov)$/i.test(labels[labels.length - 2]) && tld.length === 2;
+    const names = labels.length - (twoPartTld ? 2 : 1);
+    if (names < 2) {
+      if (!twoPartTld && !/^(com|net|org|edu|gov|mil)$/.test(tld)) return m;
+      if (host !== host.toLowerCase()) return m;
+      if (lang === 'sql') {
+        const lineStart = out.lastIndexOf('\n', offset) + 1;
+        if ((out.slice(lineStart, offset).match(/'/g) ?? []).length % 2 === 0) return m;
+      }
+    } else if (tld.length === 2 && !twoPartTld) return m;
+    return ctx.host(host, 'ambiguous');
+  });
   return out;
 }
 
