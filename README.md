@@ -247,13 +247,16 @@ suggestions. Those need the real provider.
 `main` is an intentionally empty production branch, so every push to `claude/script-modernizer`
 creates a **preview** deployment. Production (`unix-to-python.vercel.app`) was deployed from this
 branch with `vercel deploy --prod` and is **not** updated by pushes; redeploy the same way, or merge
-into `main`. Both are protected by Vercel Authentication and both run on mock providers.
+into `main`. Both are protected by Vercel Authentication.
 `APP_ACCESS_TOKEN` and `CRON_SECRET` are set as sensitive variables for Preview and Production.
-Verified on a preview: the build, the page with its CSP header, `/api/health`, `/api/convert`
-(including the WASM Python parser) and `/api/runs/:id/revise`. **Not working on a preview that is
-fully on mocks:** `approve`, `GET /api/runs/:id`, `feedback` and `status` return 404 for a run
-created by `convert`, because the in-memory mock storage is not shared between function instances
-(see "Preview deployments and storage" below). Set `STORAGE_PROVIDER=supabase` to run the whole flow.
+
+**Storage is Supabase** (Vercel Marketplace, free plan, `us-east-1`, resource `script-modernizer-db`),
+shared by Preview and Production, with `STORAGE_PROVIDER=supabase`. The schema is applied during the
+Vercel build. The model, GitHub, SMTP, memory and embeddings are still mocks, so an approval is
+"saved" to the mock GitHub and shows a placeholder commit link.
+
+Verified on a preview with the database: `/api/health`, `/api/convert`, `GET /api/runs/:id`,
+`revise`, `approve`, `feedback` and `/api/status`.
 
 Two things to know when creating a project like this one: Vercel sends a new project's **first**
 deployment to production whatever flags are used, and it takes the repository's only branch as the
@@ -475,8 +478,8 @@ end state when `prefers-reduced-motion` is set.
 ## Known limits and unverified items
 
 - **Real providers** other than Postgres storage were not run against live services (no keys in the
-  build environment). The Postgres implementation was run against a local PostgreSQL 16, not Supabase.
-- **Vercel:** preview deployments build and run; the full flow was verified only for `convert` and `revise` there (mock storage is per function instance). A production deployment exists on mocks, with the same storage limit. The two cron jobs are registered there but their runs have not been observed.
+  build environment). Postgres storage runs on Supabase in the Vercel deployments.
+- **Vercel:** the full API flow was verified on a preview with Supabase storage. Production runs the same build but was checked only through the Vercel API (ready and aliased), not by calling it. The two cron jobs are registered there; their runs have not been observed.
 - **Documentation checks.** Oracle facts were read on docs.oracle.com. Vercel, Supabase, Chroma and
   Voyage facts came from package sources and search summaries because those sites were unreachable.
 - **Mock converter scope** — see "Switching from mocks to real providers".
