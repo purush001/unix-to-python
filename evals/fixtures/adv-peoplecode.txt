@@ -1,0 +1,9 @@
+Local Record &rec;
+Local string &emplid;
+
+&rec = CreateRecord(Record.JOB);
+&emplid = %EmployeeId;
+If All(&emplid) Then
+   &rec.EMPLID.Value = &emplid;
+   &rec.SelectByKey();
+End-If;

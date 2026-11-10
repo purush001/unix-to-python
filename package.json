@@ -1,0 +1,55 @@
+{
+  "name": "script-modernizer",
+  "version": "0.1.0",
+  "private": true,
+  "engines": {
+    "node": "22.x"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "1.7.0",
+    "@codemirror/lang-python": "6.2.1",
+    "@codemirror/lang-sql": "6.10.0",
+    "@codemirror/language": "6.13.1",
+    "@codemirror/legacy-modes": "6.5.5",
+    "@codemirror/merge": "6.12.3",
+    "@codemirror/state": "6.7.6",
+    "@codemirror/view": "6.43.15",
+    "chromadb": "3.5.0",
+    "codemirror": "6.0.2",
+    "next": "16.4.6",
+    "nodemailer": "10.4.0",
+    "postgres": "4.1.0",
+    "react": "19.3.1",
+    "react-dom": "19.3.1",
+    "tree-sitter-python": "0.25.0",
+    "web-tree-sitter": "0.27.2",
+    "zod": "4.6.7"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.63.0",
+    "@types/node": "26.6.6",
+    "@types/nodemailer": "8.0.2",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "tsx": "4.23.15",
+    "typescript": "7.0.2",
+    "vitest": "5.1.0"
+  },
+  "scripts": {
+    "dev": "next dev",
+    "build": "npm run check-secrets && next build",
+    "start": "next start",
+    "typecheck": "tsc --noEmit",
+    "check-secrets": "tsx scripts/check-secrets.ts",
+    "test": "npm run check-secrets && vitest run",
+    "test:e2e": "playwright test --trace off",
+    "eval": "tsx evals/run.ts",
+    "verify-witness": "tsx scripts/verify-witness.ts",
+    "reindex-memory": "tsx scripts/reindex-memory.ts",
+    "db:migrate": "tsx scripts/migrate.ts",
+    "audit": "npm audit --audit-level=moderate",
+    "vercel-build": "tsx scripts/migrate.ts --if-configured && npm run build",
+    "eval:calibrate": "tsx evals/calibrate.ts",
+    "replay": "tsx scripts/replay.ts"
+  }
+}

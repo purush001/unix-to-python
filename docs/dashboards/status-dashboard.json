@@ -1,0 +1,45 @@
+{
+  "title": "Script Modernizer operations",
+  "source": "GET /api/status (authenticated). Each panel names the JSON path it reads.",
+  "refresh": "on demand; alerts are also evaluated daily by /api/cron/cleanup",
+  "panels": [
+    { "title": "Volume", "path": "metrics.volume", "type": "stat" },
+    { "title": "Runs by state", "path": "metrics.runsByState", "type": "bar" },
+    { "title": "Success rate", "path": "metrics.successRate", "type": "stat", "unit": "ratio" },
+    { "title": "Stage latency p50 / p95", "path": "metrics.stageDurations", "type": "table", "unit": "ms" },
+    { "title": "Model call latency p50 / p95", "path": "metrics.llmLatency", "type": "table", "unit": "ms" },
+    { "title": "Tokens (input, output, cache read, cache write)", "path": "metrics.tokens", "type": "bar" },
+    { "title": "Cache hit rate", "path": "metrics.cacheHitRate", "type": "stat", "unit": "ratio" },
+    { "title": "Cost per day", "path": "metrics.costByDay", "type": "timeseries", "unit": "USD", "note": "null means a call had no configured price" },
+    { "title": "Cost per model", "path": "metrics.costByModel", "type": "table", "unit": "USD" },
+    { "title": "Calls with no price", "path": "metrics.unpricedCalls", "type": "stat" },
+    { "title": "Repair rate", "path": "metrics.repairRate", "type": "stat", "unit": "ratio" },
+    { "title": "Transient retry rate", "path": "metrics.transientRetryRate", "type": "stat", "unit": "ratio" },
+    { "title": "Guardrail block rate (input)", "path": "metrics.guardrails.inputBlockRate", "type": "stat", "unit": "ratio" },
+    { "title": "Inputs rejected by code", "path": "metrics.guardrails.inputRejected", "type": "bar" },
+    { "title": "Output guardrail hits", "path": "metrics.guardrails.outputStripped", "type": "stat" },
+    { "title": "Commits blocked by the pre-commit scan", "path": "metrics.guardrails.commitBlocked", "type": "stat" },
+    { "title": "Judge mean score", "path": "metrics.judge.meanScore", "type": "stat", "note": "judge not calibrated until 30 human labels exist" },
+    { "title": "Judge failed criteria", "path": "metrics.judge.failedCriteria", "type": "bar" },
+    { "title": "Rating distribution", "path": "metrics.ratingDistribution", "type": "bar" },
+    { "title": "Top issue codes", "path": "metrics.topIssueCodes", "type": "table" },
+    { "title": "Failures by code", "path": "metrics.failuresByCode", "type": "bar" },
+    { "title": "Rate-limit responses", "path": "metrics.rateLimited", "type": "stat" },
+    { "title": "GitHub save failures", "path": "metrics.githubSaveFailures", "type": "stat" },
+    { "title": "Memory retrieval", "path": "metrics.memory", "type": "table" }
+  ],
+  "alerts": {
+    "path": "alerts",
+    "window": "last 24 hours (metrics.last24h)",
+    "owner": "ALERT_OWNER, default OPS_EMAIL",
+    "rules": [
+      { "id": "error-rate", "threshold": "ALERT_ERROR_RATE", "default": 0.2 },
+      { "id": "p95-latency", "threshold": "ALERT_P95_GENERATE_MS", "default": 120000 },
+      { "id": "daily-cost", "threshold": "ALERT_DAILY_COST_USD", "default": 50 },
+      { "id": "guardrail-leak", "threshold": "any", "default": 0 },
+      { "id": "judge-score", "threshold": "ALERT_JUDGE_MIN_SCORE", "default": 0.8 },
+      { "id": "save-failures", "threshold": "ALERT_SAVE_FAILURES", "default": 1 }
+    ],
+    "runbook": "docs/runbooks/alerts.md"
+  }
+}
