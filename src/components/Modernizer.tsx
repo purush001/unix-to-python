@@ -16,7 +16,7 @@ import { StatusPanel } from './StatusPanel';
 import { TargetBar } from './TargetBar';
 import { TokenGate } from './TokenGate';
 
-type Busy = null | 'restoring' | 'converting' | 'revising' | 'approving';
+type Busy = null | 'restoring' | 'converting' | 'revising' | 'approving' | 'saving-edit';
 
 const TYPES: { value: SelectableType; label: string }[] = [
   { value: 'auto', label: 'Auto-detect' },
@@ -40,6 +40,8 @@ export function Modernizer() {
 
   const [run, setRun] = useState<RunView | null>(null);
   const [busy, setBusy] = useState<Busy>(null);
+  /** Text of the target file while a person is editing it; null when not editing. */
+  const [editText, setEditText] = useState<string | null>(null);
   const [error, setError] = useState<ApiErrorInfo | null>(null);
   const [stages, setStages] = useState<StageMap>(emptyStages);
   const [unit, setUnit] = useState<string | null>(null);
@@ -60,6 +62,8 @@ export function Modernizer() {
   const [note, setNote] = useState('');
   const [statusOpen, setStatusOpen] = useState(false);
   const [toast, setToast] = useState('');
+  /** Outcome of the last "Ask for a fix": whether the entry is gone from the new draft. */
+  const [fixResult, setFixResult] = useState<{ fixed: boolean; text: string } | null>(null);
 
   const unauthorized = useCallback(() => {
     session.setToken(null);
@@ -98,7 +102,7 @@ export function Modernizer() {
 
   /** Runs one pipeline call, then resumes while the server says the run was cut off. */
   const drive = useCallback(
-    async (kind: Busy, tok: string, start: () => Promise<RunView>) => {
+    async (kind: Busy, tok: string, start: () => Promise<RunView>, after?: (r: RunView) => void) => {
       setBusy(kind);
       setError(null);
       setActiveIssue(null);
@@ -114,6 +118,7 @@ export function Modernizer() {
         adopt(r);
         const d = latestDraft(r);
         setAnnouncement(d ? `Draft version ${d.version} is ready. Status: ${STATUS_TEXT[d.status]}.` : 'The run ended without a draft.');
+        after?.(r);
       } catch (e) {
         fail(e);
         setStages((prev) => {
@@ -211,10 +216,38 @@ export function Modernizer() {
     repairSeen.current = false;
     setStages({ ...emptyStages(), intake: 'done' });
     const text = note.trim();
+    setFixResult(null);
     setNoteOpen(false);
     setNote('');
     setShowDiff(false);
     void drive('revising', token, () => api.revise(token, run.id, text, onStage));
+  };
+
+  /** From the feedback panel: a new draft that fixes one entry. Uses the same path as "Request changes". */
+  const fixIssue = (issue: IssueView) => {
+    if (!token || !run || busy) return;
+    const place = issue.line !== null ? ` at line ${issue.line}${issue.file ? ` of ${issue.file}` : ''}` : issue.sourceLine ? ` (source line ${issue.sourceLine})` : '';
+    const text = `Fix ${issue.code}${place}: ${issue.message} ${issue.nextStep}`.slice(0, 1900);
+    repairSeen.current = false;
+    setStages({ ...emptyStages(), intake: 'done' });
+    setNoteOpen(false);
+    setEditText(null);
+    setShowDiff(false);
+    setFixResult(null);
+    const before = draft?.issues.filter((i) => i.code === issue.code).length ?? 0;
+    void drive('revising', token, () => api.revise(token, run.id, text, onStage), (r) => {
+      // say plainly whether the new draft still has the entry: a request is not a fix
+      const d = latestDraft(r);
+      const left = d?.issues.filter((i) => i.code === issue.code).length ?? 0;
+      const result =
+        left === 0
+          ? { fixed: true, text: `${issue.code} is fixed in version ${d?.version}. Check the diff before you approve.` }
+          : left < before
+            ? { fixed: false, text: `${issue.code}: ${before - left} of ${before} fixed in version ${d?.version}; ${left} still there. Use "Change output" on the rest to edit them yourself.` }
+            : { fixed: false, text: `${issue.code} is still there in version ${d?.version}: the converter could not fix it automatically. Use "Change output" to edit the target yourself.` };
+      setFixResult(result);
+      setAnnouncement(result.text);
+    });
   };
 
   const approve = async () => {
@@ -229,6 +262,37 @@ export function Modernizer() {
       fail(e);
     } finally {
       setBusy(null);
+    }
+  };
+
+  /** Saves a hand edit of the target file as a new draft version. */
+  const saveEdit = async (name: string) => {
+    if (!token || !run || busy || editText === null) return;
+    setBusy('saving-edit');
+    setFixResult(null);
+    setError(null);
+    try {
+      const r = await api.edit(token, run.id, { file: name, content: editText });
+      adopt(r);
+      setFileName(name);
+      setEditText(null);
+      const d = latestDraft(r);
+      setAnnouncement(d ? `Your edit was saved as draft version ${d.version}. Status: ${STATUS_TEXT[d.status]}.` : 'Your edit was saved.');
+    } catch (e) {
+      fail(e);
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  /** Removes a change-list item or a warning from view, or restores it. Nothing is deleted from the record. */
+  const dismiss = async (kind: 'change' | 'issue', index: number, dismissed: boolean) => {
+    if (!token || !run || !draft) return;
+    try {
+      setRun(await api.dismiss(token, run.id, { version: draft.version, kind, index, dismissed }));
+      setAnnouncement(dismissed ? 'Removed from view. It stays in the record and can be restored.' : 'Restored.');
+    } catch (e) {
+      fail(e);
     }
   };
 
@@ -247,6 +311,7 @@ export function Modernizer() {
   );
 
   const reset = () => {
+    setFixResult(null);
     setRun(null);
     session.setRunId(null);
     setSource('');
@@ -266,10 +331,24 @@ export function Modernizer() {
   const saveFailed = run?.state === 'approved';
   const canAct = run?.state === 'draft_ready' && !busy;
   const viewingLatest = draft !== null && latest !== null && draft.version === latest.version;
+  const canEdit = canAct && viewingLatest && !!file && file.kind !== 'runtime';
+  const canDismiss = !!run && !busy && run.final === null && (run.state === 'draft_ready' || run.state === 'changes_requested');
   const sourceLang = run && sourceIsSanitized ? sourceLanguageOf(run) : languageForSource(scriptType, source);
   const diffBefore = run && draft ? (diffBase === 'source' ? run.sanitizedSource : (run.drafts.find((d) => d.version === diffBase)?.files[0]?.content ?? run.sanitizedSource)) : '';
   const diffBeforeIsSource = diffBase === 'source' || !run?.drafts.some((d) => d.version === diffBase);
   const phase = busy === 'converting' ? 'loading' : busy === 'revising' ? 'revising' : saved ? 'final' : saveFailed ? 'save-failed' : error && !draft ? 'error' : draft ? 'draft' : 'empty';
+
+  /** From the feedback panel: open the target for editing at the entry's line. */
+  const editFromIssue = (issue: IssueView, index: number) => {
+    if (!draft) return;
+    selectIssue(issue, index);
+    const name = issue.file && draft.files.some((f) => f.name === issue.file) ? issue.file : (draft.files[0]?.name ?? '');
+    const target = draft.files.find((f) => f.name === name);
+    if (target && target.kind !== 'runtime') {
+      setEditText(target.content);
+      setAnnouncement(`Editing ${name}${issue.line !== null ? ` at line ${issue.line}` : ''}. Save it as a new version when you are done.`);
+    }
+  };
 
   const selectIssue = (issue: IssueView, index: number) => {
     if (!draft) return;
@@ -379,6 +458,17 @@ export function Modernizer() {
               </p>
             ) : null}
 
+            {fixResult && !busy ? (
+              <div className={`banner ${fixResult.fixed ? 'banner-fixed' : 'banner-notfixed'}`} role="status" data-testid="fix-result" data-fixed={fixResult.fixed ? 'true' : 'false'}>
+                <p className="banner-title">
+                  <span aria-hidden="true">{fixResult.fixed ? '✓' : '!'}</span> {fixResult.fixed ? 'Fixed' : 'Not fixed'}
+                </p>
+                <p>{fixResult.text}</p>
+                <button type="button" className="btn btn-small btn-ghost" onClick={() => setFixResult(null)}>
+                  Dismiss
+                </button>
+              </div>
+            ) : null}
             {error ? (
               <div className="banner banner-error" role="alert" data-testid="error-banner">
                 <p className="banner-title">
@@ -445,13 +535,20 @@ export function Modernizer() {
                 showDiff={showDiff}
                 diffBase={diffBase}
                 onVersion={(v) => {
+                  setEditText(null);
                   setVersion(v);
                   setActiveIssue(null);
                   setTargetJump(null);
                   if (diffBase === v) setDiffBase('source');
                 }}
-                onFile={setFileName}
-                onToggleDiff={() => setShowDiff((s) => !s)}
+                onFile={(name) => {
+                  setEditText(null);
+                  setFileName(name);
+                }}
+                onToggleDiff={() => {
+                  setEditText(null);
+                  setShowDiff((s) => !s);
+                }}
                 onDiffBase={setDiffBase}
                 onCopy={() => void copyText(file.content).then((ok) => setToast(ok ? `Copied ${file.name} to the clipboard.` : 'Copying is blocked by the browser. Use Download instead.'))}
                 onDownload={() => {
@@ -531,11 +628,12 @@ export function Modernizer() {
                   </div>
                   <div className="pane-body">
                     <CodeEditor
-                      value={file?.content ?? ''}
-                      readOnly
+                      value={editText ?? file?.content ?? ''}
+                      onChange={editText !== null ? setEditText : undefined}
+                      readOnly={editText === null}
                       language={file ? languageForFile(file) : 'text'}
                       tone="ink"
-                      label={file ? `Target script, ${file.name}, read only` : 'Target script, empty'}
+                      label={file ? `Target script, ${file.name}, ${editText !== null ? 'editing' : 'read only'}` : 'Target script, empty'}
                       jump={targetJump && file && draft && targetJump.file === file.name && targetJump.version === draft.version ? targetJump : null}
                       testId="target-editor"
                     />
@@ -545,7 +643,42 @@ export function Modernizer() {
                       </p>
                     ) : null}
                   </div>
-                  <p className="pane-note">{file ? (saved ? 'Final output, as committed.' : 'Read-only. Review it, then approve or request changes below.') : 'Nothing is saved until you approve.'}</p>
+                  {file && editText !== null ? (
+                    <div className="pane-edit" data-testid="edit-bar">
+                      <div className="row">
+                        <button type="button" className="btn btn-primary" onClick={() => void saveEdit(file.name)} disabled={busy !== null || editText === file.content || !editText.trim()} data-testid="edit-save">
+                          {busy === 'saving-edit' ? 'Saving…' : `Save as version ${(latest?.version ?? 0) + 1}`}
+                        </button>
+                        <button type="button" className="btn btn-ghost" onClick={() => setEditText(null)} disabled={busy !== null} data-testid="edit-cancel">
+                          Cancel
+                        </button>
+                      </div>
+                      <p className="pane-note">
+                        You are editing {file.name}. Saving runs the same checks as a converted draft and keeps version {draft?.version} unchanged. Hosts, names and secrets you type are replaced before anything is stored.
+                      </p>
+                    </div>
+                  ) : (
+                    <p className="pane-note">
+                      {file ? (
+                        saved ? (
+                          'Final output, as committed.'
+                        ) : canEdit ? (
+                          <>
+                            <button type="button" className="btn btn-small btn-ghost" onClick={() => setEditText(file.content)} data-testid="edit-target">
+                              <span aria-hidden="true">✎ </span>Edit {file.name}
+                            </button>{' '}
+                            Review it, then approve, edit it yourself, or request changes below.
+                          </>
+                        ) : file.kind === 'runtime' ? (
+                          'The shared runtime is the same for every script and cannot be edited here. Deploy it next to the script.'
+                        ) : (
+                          'Read-only. Review it, then approve or request changes below.'
+                        )
+                      ) : (
+                        'Nothing is saved until you approve.'
+                      )}
+                    </p>
+                  )}
                 </div>
               </div>
             )}
@@ -589,10 +722,10 @@ export function Modernizer() {
                 <span className="quiet" data-testid="run-id">Run ID <code>{run.id}</code> (quote it when you report a problem)</span>
               </h2>
               <div className="review-grid">
-                <ReviewPanel run={run} draft={draft} />
+                <ReviewPanel run={run} draft={draft} canDismiss={canDismiss} onDismiss={(kind, index, on) => void dismiss(kind, index, on)} />
                 <div className="review-stack">
                   {saved || saveFailed ? <RatingPanel existing={run.rating} onRate={(b) => sendFeedback(b, true)} /> : null}
-                  <FeedbackPanel key={`${run.id}-${draft.version}`} issues={draft.issues} activeIndex={activeIssue} onSelect={selectIssue} onReport={(b) => sendFeedback(b, false)} />
+                  <FeedbackPanel key={`${run.id}-${draft.version}`} issues={draft.issues} activeIndex={activeIssue} onSelect={selectIssue} onReport={(b) => sendFeedback(b, false)} dismissed={draft.dismissed.issues} canDismiss={canDismiss} onDismiss={(index, on) => void dismiss('issue', index, on)} canChange={canAct && viewingLatest} onEdit={editFromIssue} onFix={fixIssue} />
                   {run.reviewerNotes.length > 0 ? (
                     <section className="panel" aria-labelledby="notes-h">
                       <h3 id="notes-h" className="panel-title">

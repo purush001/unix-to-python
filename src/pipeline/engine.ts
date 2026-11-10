@@ -1,6 +1,6 @@
 import { ADAPTERS } from '@/adapters';
 import { review as reviewCall, REVIEWER_ROLE, reviewerPromptVersion, type AgentCall } from '@/agents/agent';
-import { RULE_REVIEWER_NOTE, RULE_UNSPECIFIED } from '@/agents/prompts';
+import { RULE_REVIEWER_EDIT, RULE_REVIEWER_NOTE, RULE_UNSPECIFIED } from '@/agents/prompts';
 import { getConfig, getConfigInt } from '@/config/env';
 import { addLlmSpan, addSpan, newSpanId, spanClock, tokensSpent } from '@/lib/trace';
 import { shellAgent } from '@/agents/shell-agent';
@@ -38,7 +38,7 @@ export interface EngineDeps {
 
 const AGENTS = { plsql: sqlAgent, 'shell-python': shellAgent } as const;
 const LANG: Record<Platform, Lang> = { plsql: 'sql', 'shell-python': 'python' };
-const LEAK_CODES: IssueCode[] = [Codes.SANITIZE_LEAK_DETECTED, Codes.SECRET_IN_OUTPUT];
+export const LEAK_CODES: IssueCode[] = [Codes.SANITIZE_LEAK_DETECTED, Codes.SECRET_IN_OUTPUT];
 
 /**
  * Retries transient provider failures (malformed or empty output, 5xx, timeout, network)
@@ -63,7 +63,7 @@ export async function withTransientRetry<T>(fn: (attempt: number) => Promise<T>,
  * still replace was invented by the model. It is removed before the draft is stored or
  * shown, and reported as an error.
  */
-function scrub(text: string, lang: Lang): { text: string; issues: Issue[] } {
+export function scrub(text: string, lang: Lang): { text: string; issues: Issue[] } {
   const issues: Issue[] = [];
   const secretLines = scanSecrets(text, lang).map((h) => h.line);
   const clean = sanitize(text, lang);
@@ -100,7 +100,7 @@ function setDraft(unit: UnitState, platform: Platform, out: { converted: string;
  * guidance), one the system prompt defines, or an issue code. Anything else was invented.
  */
 export function unknownRuleIds(unit: Pick<UnitState, 'changes' | 'guidance' | 'platform'>): string[] {
-  const allowed = new Set<string>([...unit.guidance.map((g) => g.id), ...Object.keys(ADAPTERS[unit.platform].builtinRuleIds), ...ALL_CODES, RULE_REVIEWER_NOTE, RULE_UNSPECIFIED]);
+  const allowed = new Set<string>([...unit.guidance.map((g) => g.id), ...Object.keys(ADAPTERS[unit.platform].builtinRuleIds), ...ALL_CODES, RULE_REVIEWER_NOTE, RULE_REVIEWER_EDIT, RULE_UNSPECIFIED]);
   return [...new Set(unit.changes.map((c) => c.ruleId).filter((id) => !allowed.has(id)))];
 }
 

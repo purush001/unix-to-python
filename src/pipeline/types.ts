@@ -115,7 +115,7 @@ export interface GuidanceItem {
 
 export interface OutputFile {
   name: string;
-  kind: 'sql' | 'python' | 'config' | 'requirements';
+  kind: 'sql' | 'python' | 'config' | 'requirements' | 'runtime';
   content: string;
 }
 
@@ -166,6 +166,10 @@ export interface DraftVersion {
   result: ScriptResult;
   suggestions: Suggestion[];
   unitResults: { unitId: string; platform: Platform; kind: ScriptType; origin: UnitState['origin']; attempts: number; codes: IssueCode[] }[];
+  /** Change-list items and warnings the reviewer removed from view (indexes into result.changes and result.issues). Nothing is deleted from the record. */
+  dismissed?: { changes: number[]; issues: number[] };
+  /** Set when a person wrote this version in the target editor. */
+  editedFile?: string;
 }
 
 export interface RunOptions {

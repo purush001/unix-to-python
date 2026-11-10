@@ -149,6 +149,8 @@ export const api = {
   approve: (token: string, id: string) => json<RunView>(token, `/api/runs/${encodeURIComponent(id)}/approve`, { method: 'POST' }),
   feedback: (token: string, id: string, body: FeedbackBody) => json<RunView>(token, `/api/runs/${encodeURIComponent(id)}/feedback`, { method: 'POST', body }),
   run: (token: string, id: string) => json<RunView>(token, `/api/runs/${encodeURIComponent(id)}`),
+  edit: (token: string, id: string, body: { file: string; content: string; note?: string }) => json<RunView>(token, `/api/runs/${encodeURIComponent(id)}/edit`, { method: 'POST', body }),
+  dismiss: (token: string, id: string, body: { version: number; kind: 'change' | 'issue'; index: number; dismissed: boolean }) => json<RunView>(token, `/api/runs/${encodeURIComponent(id)}/dismiss`, { method: 'POST', body }),
   status: (token: string) => json<StatusView>(token, '/api/status'),
   disableRule: (token: string, id: string) => json<{ id: string; status: string }>(token, `/api/rules/${encodeURIComponent(id)}/disable`, { method: 'POST' }),
 };

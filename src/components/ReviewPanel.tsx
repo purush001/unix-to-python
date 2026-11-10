@@ -6,10 +6,16 @@ const RETIRED = 'After 19c is retired';
 interface Props {
   run: RunView;
   draft: DraftView;
+  /** True while the draft can still be changed (not approved, latest version). */
+  canDismiss: boolean;
+  onDismiss: (kind: 'change' | 'issue', index: number, dismissed: boolean) => void;
 }
 
 /** The change list, sanitization summary, warnings by code and suggestions for one draft. */
-export function ReviewPanel({ run, draft }: Props) {
+export function ReviewPanel({ run, draft, canDismiss, onDismiss }: Props) {
+  const removed = draft.dismissed.changes;
+  const shown = draft.changes.map((c, i) => ({ c, i })).filter((x) => !removed.includes(x.i));
+  const hidden = draft.changes.map((c, i) => ({ c, i })).filter((x) => removed.includes(x.i));
   const groups = new Map<string, { severity: string; count: number; lines: string[] }>();
   for (const i of draft.issues) {
     const g = groups.get(i.code) ?? { severity: i.severity, count: 0, lines: [] };
@@ -25,29 +31,58 @@ export function ReviewPanel({ run, draft }: Props) {
     <div className="review-stack">
       <section className="panel" aria-labelledby="changes-h">
         <h3 id="changes-h" className="panel-title">
-          Change list <span className="count">{draft.changes.length}</span>
+          Change list <span className="count">{shown.length}</span>
         </h3>
         {draft.changes.length === 0 ? (
           <p className="quiet">No changes were needed.</p>
         ) : (
-          <ol className="changes" data-testid="change-list">
-            {draft.changes.map((c, i) => (
-              <li key={`${c.ruleId}-${i}`} className="change">
-                <div className="change-head">
-                  <code className="rule">{c.ruleId}</code>
-                  <span className="change-lines">lines: {c.lines}</span>
-                  <span className={`risk risk-${c.risk}`}>
-                    <span aria-hidden="true">{RISK_GLYPH[c.risk]} </span>
-                    {c.risk} risk
-                  </span>
-                </div>
-                <p className="change-summary">{c.summary}</p>
-                <p className="change-reason">
-                  <span className="tiny-label">Why</span> {c.reason}
-                </p>
-              </li>
-            ))}
-          </ol>
+          <>
+            {shown.length === 0 ? <p className="quiet">Every change was removed from view.</p> : null}
+            <ol className="changes" data-testid="change-list">
+              {shown.map(({ c, i }) => (
+                <li key={`${c.ruleId}-${i}`} className="change">
+                  <div className="change-head">
+                    <code className="rule">{c.ruleId}</code>
+                    <span className="change-lines">lines: {c.lines}</span>
+                    <span className={`risk risk-${c.risk}`}>
+                      <span aria-hidden="true">{RISK_GLYPH[c.risk]} </span>
+                      {c.risk} risk
+                    </span>
+                    {canDismiss ? (
+                      <button type="button" className="btn btn-small btn-ghost item-remove" onClick={() => onDismiss('change', i, true)} data-testid="change-remove">
+                        Remove<span className="sr-only"> change {c.ruleId} from the list</span>
+                      </button>
+                    ) : null}
+                  </div>
+                  <p className="change-summary">{c.summary}</p>
+                  <p className="change-reason">
+                    <span className="tiny-label">Why</span> {c.reason}
+                  </p>
+                </li>
+              ))}
+            </ol>
+            {hidden.length > 0 ? (
+              <details className="removed" data-testid="changes-removed">
+                <summary>
+                  Removed from view <span className="count">{hidden.length}</span>
+                </summary>
+                <p className="quiet">These stay in the record and in the saved report, marked as removed.</p>
+                <ul className="removed-list">
+                  {hidden.map(({ c, i }) => (
+                    <li key={`${c.ruleId}-${i}`}>
+                      <code className="rule">{c.ruleId}</code>
+                      <span>{c.summary}</span>
+                      {canDismiss ? (
+                        <button type="button" className="btn btn-small btn-ghost" onClick={() => onDismiss('change', i, false)} data-testid="change-restore">
+                          Restore<span className="sr-only"> change {c.ruleId}</span>
+                        </button>
+                      ) : null}
+                    </li>
+                  ))}
+                </ul>
+              </details>
+            ) : null}
+          </>
         )}
       </section>
 

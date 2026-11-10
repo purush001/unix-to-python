@@ -3,7 +3,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { RUNTIME_MAIN, runtimeCore, runtimeImports } from '@/adapters/shell-python/runtime';
+import { RUNTIME_FILE, runtimeExports, runtimeModule } from '@/adapters/shell-python/runtime';
 
 let python: string | null = null;
 try {
@@ -18,13 +18,16 @@ try {
  * No user-supplied script is ever executed.
  */
 function harness(jobBody: string): string {
-  const f = { db: false, ssh: false, ftp: false, mail: false, cmd: true };
   return [
     '"""Synthetic failure harness."""',
     'from __future__ import annotations',
     '',
-    runtimeImports(f),
-    runtimeCore(f),
+    'import argparse',
+    'import sys',
+    'from typing import Optional, Sequence',
+    '',
+    'from script_runtime import LOG, RunState, ScriptError, run_command, run_main, step',
+    '',
     '',
     'def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:',
     '    parser = argparse.ArgumentParser()',
@@ -35,7 +38,15 @@ function harness(jobBody: string): string {
     '',
     'def job(state: RunState, args: argparse.Namespace) -> int:',
     jobBody,
-    RUNTIME_MAIN,
+    '',
+    '',
+    'def main(argv: Optional[Sequence[str]] = None) -> int:',
+    '    return run_main(job, parse_args, argv)',
+    '',
+    '',
+    'if __name__ == "__main__":',
+    '    sys.exit(main())',
+    '',
   ].join('\n');
 }
 
@@ -59,16 +70,20 @@ describe.skipIf(!python)('generated Python runtime: error capture', () => {
   const script = path.join(dir, 'synthetic_job.py');
   const source = harness(JOB);
   writeFileSync(script, source);
+  // the shared runtime sits next to the script, as it does in a delivered conversion
+  writeFileSync(path.join(dir, RUNTIME_FILE), runtimeModule());
   // port 9 is closed: the failure email cannot be delivered
   writeFileSync(path.join(dir, 'config.ini'), `[smtp]\nhost = 127.0.0.1\nport = 9\nsender = ops@script.com\n[logging]\nlog_dir = ${dir}/logs\nlevel = INFO\n[source]\nhost = source_server\n`);
   const run = (mode: string) => {
-    const r = spawnSync(python!, ['-I', script, '--config', path.join(dir, 'config.ini'), mode], { encoding: 'utf8', timeout: 60000 });
+    const r = spawnSync(python!, ['-E', '-s', script, '--config', path.join(dir, 'config.ini'), mode], { encoding: 'utf8', timeout: 60000 });
     return { code: r.status, out: (r.stdout ?? '') + (r.stderr ?? '') };
   };
   const lineOf = (mark: string) => source.split('\n').findIndex((l) => l.includes(mark)) + 1;
 
-  it('compiles', () => {
+  it('the script and the shared runtime compile, and the runtime imports without oracledb or paramiko', () => {
     execFileSync(python!, ['-I', '-m', 'py_compile', script]);
+    execFileSync(python!, ['-I', '-m', 'py_compile', path.join(dir, RUNTIME_FILE)]);
+    expect(runtimeExports()).toEqual(expect.arrayContaining(['LOG', 'RunState', 'ScriptError', 'run_main', 'run_sql', 'run_command', 'sftp_client', 'ftp_session', 'send_mail', 'remove_paths']));
   });
 
   it('records the failing line and message for an unhandled exception and exits 1', () => {
@@ -99,8 +114,9 @@ describe.skipIf(!python)('generated Python runtime: error capture', () => {
     const r = run('ok');
     expect(r.code).toBe(0);
     const log = readFileSync(path.join(dir, 'logs', 'synthetic_job.log'), 'utf8');
-    expect(log).toMatch(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2},\d{3} INFO [0-9a-f]{12} synthetic_job\.py:\d+ Start synthetic_job\.py$/m);
-    expect(log).toContain('all good');
+    expect(log).toMatch(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2},\d{3} INFO [0-9a-f]{12} script_runtime\.py:\d+ Start synthetic_job\.py$/m);
+    // a line logged by the job itself carries the script's own file and line
+    expect(log).toMatch(/INFO [0-9a-f]{12} synthetic_job\.py:\d+ all good$/m);
     expect(log).not.toContain('127.0.0.1');
     rmSync(dir, { recursive: true, force: true });
   });
