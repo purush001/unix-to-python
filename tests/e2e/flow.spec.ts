@@ -21,7 +21,7 @@ test('convert, review, request changes, approve with a failed save and retry, ra
   await expect(page.getByRole('button', { name: /Skip/ })).toBeVisible();
   await page.keyboard.press('Escape');
   await expect(page.getByTestId('hook')).toHaveAttribute('data-state', 'done');
-  await expect(page.getByRole('heading', { level: 1 })).toHaveText('19c and shell in. Upgrade-safe SQL and Python out.');
+  await expect(page.getByRole('heading', { level: 1 })).toHaveText('SQL and Shell ==> SQL and Python');
 
   // the access token gate
   await page.getByLabel('Access token').fill(TOKEN);

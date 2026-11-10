@@ -1,6 +1,6 @@
 # Script Modernizer
 
-**19c and shell in. Upgrade-safe SQL and Python out.**
+**SQL and Shell ==> SQL and Python**
 
 A single-tenant internal web app for DBAs. Paste a legacy Oracle 19c SQL, PL/SQL, SQL\*Plus or
 ksh/bash script; receive a sanitized, reviewed, faster equivalent:
