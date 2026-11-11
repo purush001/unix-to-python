@@ -3,6 +3,7 @@ import type { RunView, StatusView, TraceView } from '@/lib/api-types';
 import { mockGitState } from '@/providers/github/mock';
 import { mockDb } from '@/providers/storage/mock';
 import type { SkillRule } from '@/pipeline/types';
+import { groupIssues } from '@/components/run-helpers';
 import { freshDb } from '../helpers';
 
 const TOKEN = 'unit-test-access-token-0001';
@@ -140,17 +141,31 @@ describe('removing items from the change list and the feedback panel', () => {
     expect(mockGitState().commits).toHaveLength(commits);
   });
 
-  it('an error can never be removed, and bad indexes and versions are rejected', async () => {
+  it('an error can be deleted from the list too, several at once, and the draft stays failed', async () => {
     const run = await convert(SQL);
     const broken = await call('edit', run.id, { file: 'target.sql', content: run.drafts[0].files[0].content.replace('END LOOP;', '') });
     const v2 = ((await broken.json()) as RunView).drafts[1];
-    const error = v2.issues.findIndex((i) => i.severity === 'error');
-    const r = await call('dismiss', run.id, { version: 2, kind: 'issue', index: error, dismissed: true });
-    expect(r.status).toBe(422);
-    expect(((await r.json()) as { error: { code: string } }).error.code).toBe('ISSUE_NOT_DISMISSIBLE');
-    expect((await call('dismiss', run.id, { version: 2, kind: 'issue', index: 999, dismissed: true })).status).toBe(400);
+    const errors = v2.issues.map((i, n) => ({ i, n })).filter((x) => x.i.severity === 'error').map((x) => x.n);
+    expect(errors.length).toBeGreaterThan(0);
+    expect(v2.status).toBe('failed');
+    const r = await call('dismiss', run.id, { version: 2, kind: 'issue', indexes: errors, dismissed: true });
+    expect(r.status).toBe(200);
+    const after = ((await r.json()) as RunView).drafts[1];
+    expect(after.dismissed.issues).toEqual(errors);
+    // deleting an error from the list hides it; it does not make the draft pass
+    expect(after.status).toBe('failed');
+    expect(after.issues).toEqual(v2.issues);
+    const back = await call('dismiss', run.id, { version: 2, kind: 'issue', indexes: errors, dismissed: false });
+    expect(((await back.json()) as RunView).drafts[1].dismissed.issues).toEqual([]);
+  });
+
+  it('bad indexes, versions and kinds are rejected', async () => {
+    const run = await convert(SQL);
+    expect((await call('dismiss', run.id, { version: 1, kind: 'issue', index: 999, dismissed: true })).status).toBe(400);
+    expect((await call('dismiss', run.id, { version: 1, kind: 'issue', indexes: [0, 999], dismissed: true })).status).toBe(400);
+    expect((await call('dismiss', run.id, { version: 1, kind: 'issue', dismissed: true })).status).toBe(400);
     expect((await call('dismiss', run.id, { version: 9, kind: 'change', index: 0, dismissed: true })).status).toBe(404);
-    expect((await call('dismiss', run.id, { version: 2, kind: 'other', index: 0, dismissed: true })).status).toBe(400);
+    expect((await call('dismiss', run.id, { version: 1, kind: 'other', index: 0, dismissed: true })).status).toBe(400);
   });
 });
 
@@ -292,5 +307,20 @@ describe('deleting a learned rule', () => {
     expect(mockDb().rules.has('learned-plsql_ccc')).toBe(true);
     expect((await del('learned-nope')).status).toBe(404);
     expect((await del('base-plsql-error-capture')).status).toBe(404);
+  });
+});
+
+describe('feedback panel: the same finding on several lines is one entry', () => {
+  const entry = (n: number, code: string, message: string, line: number | null, severity: 'error' | 'warning' = 'error') => ({ n, i: { code, message, line, severity, explanation: '', nextStep: '' } as never });
+
+  it('groups by code, severity, message and file; different messages stay separate', () => {
+    const groups = groupIssues([
+      entry(0, 'SHELL_UNMAPPED_CONSTRUCT', 'This part of the shell script was not converted.', 41),
+      entry(1, 'SHELL_UNMAPPED_CONSTRUCT', 'This part of the shell script was not converted.', 82),
+      entry(2, 'REPAIR_NO_PROGRESS', 'A repair attempt left the same set of errors; repairing stopped early.', null, 'warning'),
+      entry(3, 'SQL_PARSE_ERROR', 'Unbalanced BEGIN.', 3),
+      entry(4, 'SQL_PARSE_ERROR', 'Missing terminator.', 9),
+    ]);
+    expect(groups.map((g) => [g.first.n, g.others.map((o) => o.n)])).toEqual([[0, [1]], [2, []], [3, []], [4, []]]);
   });
 });

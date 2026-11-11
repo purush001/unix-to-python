@@ -216,7 +216,7 @@ function: authenticate → validate (zod) → load state from storage → work �
 | `POST /api/runs/:id/revise` `{ note }` | New draft using the reviewer's note |
 | `POST /api/runs/:id/resume` | Continue a cut-off run (addition to the spec) |
 | `POST /api/runs/:id/edit` `{ file, content, note? }` | Save a hand edit of the latest draft as a new draft version. It passes the output guardrails and the code validators; no model is called |
-| `POST /api/runs/:id/dismiss` `{ version, kind, index, dismissed }` | Remove a change-list item or a warning from view, or restore it. Nothing is deleted; an error cannot be removed |
+| `POST /api/runs/:id/dismiss` `{ version, kind, index or indexes, dismissed }` | Delete change-list items or feedback entries from the lists, or restore them. Nothing is deleted from the record, and the draft's status does not change |
 | `POST /api/runs/:id/approve` | Mark final, save to GitHub; call again to retry a failed save |
 | `POST /api/runs/:id/feedback` `{ rating?, comment?, errorCode?, line? }` | Rating or problem report |
 | `GET /api/runs/:id` | Stored state (page recovery) |
@@ -390,11 +390,12 @@ again; the selector overrides the detection for everything except those wrong co
   output guardrails as model output (hosts, names and secrets are replaced and reported) and the
   same code validators. No model is called, so the independent review does not run on a hand edit;
   the new version carries the warning `DRAFT_EDITED_BY_REVIEWER`. `script_runtime.py` cannot be edited.
-- **Delete from the lists.** Each change-list item and each warning has a "Delete" button. Deleted items
-  move to a "Deleted" list and can be restored. Nothing is deleted: they stay in the
-  stored draft and are marked as removed in the saved `report.md`. An error cannot be removed; it
-  has to be fixed. The Delete buttons stay available after approval; a report already saved to GitHub is
-  not rewritten.
+- **Delete from the lists.** Every change-list item and every feedback entry, errors included, has a
+  "Delete" button. Deleted items move to a "Deleted" list and can be restored at any time, also
+  after approval. Nothing is deleted from the record: the items stay in the stored draft and are
+  marked as deleted in the saved `report.md`. Deleting an error only hides it; the draft's status
+  stays "failed" until the error is fixed. The same finding on several lines is shown as one
+  entry with a button per line, and deleting it deletes all of them.
 - **Change the output from the feedback panel.** Each entry has two actions. "Change output" opens
   the target editor at that entry's line so you can fix it yourself. "Ask for a fix" requests a
   new draft with a note built from the entry (its code, line, message and next step). The page then

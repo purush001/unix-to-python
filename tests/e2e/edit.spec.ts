@@ -89,6 +89,24 @@ test('edit the target by hand, then remove and restore a change and a warning', 
   await expect(page.getByTestId('fix-result')).toHaveAttribute('data-fixed', 'false');
   await expect(page.getByTestId('fix-result')).toContainText('could not fix it automatically');
 
+  // break the script by hand so the draft has errors: an error can be deleted from the list as well
+  await page.getByTestId('edit-target').click();
+  await target.locator('.cm-content').click();
+  await page.keyboard.press('Control+End');
+  await page.keyboard.type('\nBEGIN\n  NULL;\n');
+  await page.getByTestId('edit-save').click();
+  await expect(page.getByTestId('draft-status')).toContainText('failed');
+  const errorEntries = page.getByTestId('issue-item').filter({ hasText: 'SQL_PARSE_ERROR' });
+  let left = await errorEntries.count();
+  expect(left).toBeGreaterThan(0);
+  while (left > 0) {
+    await errorEntries.first().getByTestId('issue-remove').click();
+    left -= 1;
+    await expect(errorEntries).toHaveCount(left);
+  }
+  await expect(page.getByTestId('issues-removed')).toBeVisible();
+  await expect(page.getByTestId('draft-status')).toContainText('failed'); // hiding an error does not make the draft pass
+
   // delete the run from Recent runs: it asks first, then the row and the open run are gone
   await page.getByRole('button', { name: /Status/ }).click();
   const runId = ((await page.getByTestId('run-id').locator('code').textContent()) ?? '').trim();

@@ -286,10 +286,10 @@ export function Modernizer() {
   };
 
   /** Removes a change-list item or a warning from view, or restores it. Nothing is deleted from the record. */
-  const dismiss = async (kind: 'change' | 'issue', index: number, dismissed: boolean) => {
+  const dismiss = async (kind: 'change' | 'issue', indexes: number[], dismissed: boolean) => {
     if (!token || !run || !draft) return;
     try {
-      setRun(await api.dismiss(token, run.id, { version: draft.version, kind, index, dismissed }));
+      setRun(await api.dismiss(token, run.id, { version: draft.version, kind, indexes, dismissed }));
       setAnnouncement(dismissed ? 'Deleted from the list. It can be restored from the Deleted list.' : 'Restored.');
     } catch (e) {
       fail(e);
@@ -728,10 +728,10 @@ export function Modernizer() {
                 <span className="quiet" data-testid="run-id">Run ID <code>{run.id}</code> (quote it when you report a problem)</span>
               </h2>
               <div className="review-grid">
-                <ReviewPanel run={run} draft={draft} canDismiss={canDismiss} onDismiss={(kind, index, on) => void dismiss(kind, index, on)} />
+                <ReviewPanel run={run} draft={draft} canDismiss={canDismiss} onDismiss={(kind, index, on) => void dismiss(kind, [index], on)} />
                 <div className="review-stack">
                   {saved || saveFailed ? <RatingPanel existing={run.rating} onRate={(b) => sendFeedback(b, true)} /> : null}
-                  <FeedbackPanel key={`${run.id}-${draft.version}`} issues={draft.issues} activeIndex={activeIssue} onSelect={selectIssue} onReport={(b) => sendFeedback(b, false)} dismissed={draft.dismissed.issues} canDismiss={canDismiss} onDismiss={(index, on) => void dismiss('issue', index, on)} canChange={canAct && viewingLatest} onEdit={editFromIssue} onFix={fixIssue} />
+                  <FeedbackPanel key={`${run.id}-${draft.version}`} issues={draft.issues} activeIndex={activeIssue} onSelect={selectIssue} onReport={(b) => sendFeedback(b, false)} dismissed={draft.dismissed.issues} canDismiss={canDismiss} onDismiss={(indexes, on) => void dismiss('issue', indexes, on)} canChange={canAct && viewingLatest} onEdit={editFromIssue} onFix={fixIssue} />
                   {run.reviewerNotes.length > 0 ? (
                     <section className="panel" aria-labelledby="notes-h">
                       <h3 id="notes-h" className="panel-title">
