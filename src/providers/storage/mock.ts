@@ -40,6 +40,11 @@ export function createMockStorage(): Storage {
     async listRuns(limit) {
       return [...db.runs.values()].sort((a, b) => b.createdAt.localeCompare(a.createdAt)).slice(0, limit).map(clone);
     },
+    async deleteRun(id) {
+      const had = db.runs.delete(id);
+      db.feedback = db.feedback.filter((f) => f.runId !== id);
+      return had;
+    },
     async addFeedback(fb) {
       db.feedback.push(clone(fb));
     },

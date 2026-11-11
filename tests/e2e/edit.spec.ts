@@ -16,6 +16,8 @@ test('edit the target by hand, then remove and restore a change and a warning', 
   await page.getByRole('button', { name: 'PL/SQL cursor loop' }).click();
   await page.getByTestId('convert').click();
   await expect(page.getByTestId('draft-version')).toHaveText('version 1 of 1');
+  // auto-detect says what it decided
+  await expect(page.getByTestId('detected-type')).toContainText('Detected:');
 
   // the target is read-only until Edit is pressed
   const target = page.getByTestId('target-editor');
@@ -86,6 +88,22 @@ test('edit the target by hand, then remove and restore a change and a warning', 
   await expect(page.getByTestId('draft-version')).toHaveText('version 4 of 4');
   await expect(page.getByTestId('fix-result')).toHaveAttribute('data-fixed', 'false');
   await expect(page.getByTestId('fix-result')).toContainText('could not fix it automatically');
+
+  // delete the run from Recent runs: it asks first, then the row and the open run are gone
+  await page.getByRole('button', { name: /Status/ }).click();
+  const runId = ((await page.getByTestId('run-id').locator('code').textContent()) ?? '').trim();
+  const row = page.locator('table.table tbody tr').filter({ hasText: runId });
+  await expect(row).toHaveCount(1);
+  await row.getByTestId('run-delete').click();
+  await row.getByRole('button', { name: 'Keep' }).click(); // changed my mind: nothing happens
+  await expect(row).toHaveCount(1);
+  await row.getByTestId('run-delete').click();
+  await row.getByTestId('run-delete-confirm').click();
+  await expect(page.getByTestId('run-delete-note')).toContainText(`Run ${runId} was deleted.`);
+  await expect(row).toHaveCount(0);
+  await expect(page.getByTestId('run-id')).toHaveCount(0); // the workbench was cleared
+  await page.reload();
+  await expect(page.getByTestId('draft-version')).toHaveCount(0);
 
   expect(problems).toEqual([]);
 });

@@ -290,7 +290,7 @@ export function Modernizer() {
     if (!token || !run || !draft) return;
     try {
       setRun(await api.dismiss(token, run.id, { version: draft.version, kind, index, dismissed }));
-      setAnnouncement(dismissed ? 'Removed from view. It stays in the record and can be restored.' : 'Restored.');
+      setAnnouncement(dismissed ? 'Deleted from the list. It can be restored until you approve.' : 'Restored.');
     } catch (e) {
       fail(e);
     }
@@ -402,6 +402,11 @@ export function Modernizer() {
                     </option>
                   ))}
                 </select>
+                {run ? (
+                  <span className="quiet detected" data-testid="detected-type">
+                    {scriptType === 'auto' ? 'Detected' : 'Converted as'}: <b>{TYPES.find((t) => t.value === run.scriptType)?.label ?? run.scriptType}</b>
+                  </span>
+                ) : null}
               </div>
               <label className="check">
                 <input type="checkbox" checked={generateConfig} onChange={(e) => setGenerateConfig(e.target.checked)} />
@@ -754,7 +759,15 @@ export function Modernizer() {
               {providers ? `Providers: ${Object.entries(providers).map(([k, v]) => `${k} ${v}`).join(' · ')}` : 'Runs, metrics, providers and learned rules'}
             </span>
           </section>
-          {statusOpen ? <StatusPanel token={token} onUnauthorized={unauthorized} refreshKey={`${run?.id ?? ''}:${run?.updatedAt ?? ''}`} /> : null}
+          {statusOpen ? <StatusPanel
+              token={token}
+              onUnauthorized={unauthorized}
+              refreshKey={`${run?.id ?? ''}:${run?.updatedAt ?? ''}`}
+              onRunDeleted={(id) => {
+                // the run on screen no longer exists: start clean
+                if (run?.id === id) reset();
+              }}
+            /> : null}
         </>
       )}
     </main>

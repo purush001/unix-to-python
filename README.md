@@ -220,6 +220,7 @@ function: authenticate → validate (zod) → load state from storage → work �
 | `POST /api/runs/:id/approve` | Mark final, save to GitHub; call again to retry a failed save |
 | `POST /api/runs/:id/feedback` `{ rating?, comment?, errorCode?, line? }` | Rating or problem report |
 | `GET /api/runs/:id` | Stored state (page recovery) |
+| `DELETE /api/runs/:id` | Delete a run and its feedback from storage. It cannot be undone. A copy already saved to GitHub is kept, and a run that is still converting is refused (409) |
 | `GET /api/runs/:id/trace` | The run's trace: every span with tokens, cost and latency, the witness, and the attached scores. No script text |
 | `GET /api/status` | Recent runs, dashboard metrics, alerts, learned rules with witnesses |
 | `POST /api/rules/:id/disable` | A human disables a learned rule (addition to the spec) |
@@ -372,6 +373,15 @@ vercel build && vercel deploy --prebuilt     # preview deployment
    are passed to the agent and recorded in the witness. If Chroma is unreachable the conversion
    continues with the base rules and warning `MEMORY_UNAVAILABLE`.
 
+## Script type detection
+
+"Auto-detect" decides the type by rules, and after a conversion the page shows what it decided
+("Detected: …"). It accepts full scripts and everyday fragments: a query with no `;` (the built-in
+converter adds the missing terminator and lists it), or a few shell commands with no `#!` line.
+Text that reads like prose is still rejected, and so are HTML, JSON, Python and binary input. If
+auto-detect rejects something that is a script, choose its type under "Script type" and convert
+again; the selector overrides the detection for everything except those wrong content types.
+
 ## Reviewing a draft
 
 - **Edit the target.** "Edit" under the target editor makes the file editable. "Save as version N"
@@ -379,8 +389,8 @@ vercel build && vercel deploy --prebuilt     # preview deployment
   output guardrails as model output (hosts, names and secrets are replaced and reported) and the
   same code validators. No model is called, so the independent review does not run on a hand edit;
   the new version carries the warning `DRAFT_EDITED_BY_REVIEWER`. `script_runtime.py` cannot be edited.
-- **Remove from view.** Each change-list item and each warning has a "Remove" button. Removed items
-  move to a "Removed from view" list and can be restored. Nothing is deleted: they stay in the
+- **Delete from the lists.** Each change-list item and each warning has a "Delete" button. Deleted items
+  move to a "Deleted" list and can be restored. Nothing is deleted: they stay in the
   stored draft and are marked as removed in the saved `report.md`. An error cannot be removed; it
   has to be fixed. After approval the lists are a fixed record.
 - **Change the output from the feedback panel.** Each entry has two actions. "Change output" opens
@@ -393,6 +403,9 @@ vercel build && vercel deploy --prebuilt     # preview deployment
   needs the real model or a hand edit. A requested fix starts again from the sanitized source, so
   it does not keep an earlier hand edit.
 - **Request changes** sends a note to the model and produces a new draft, as before.
+- **Delete a run.** In the Status view, each row of "Recent runs" has a Delete button that asks for
+  confirmation. It removes the run's drafts, review record and feedback from storage for good. It
+  does not remove a conversion already saved to GitHub, and log lines stay until the retention limit.
 
 ## Human approval and GitHub
 

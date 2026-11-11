@@ -37,7 +37,7 @@ export function ReviewPanel({ run, draft, canDismiss, onDismiss }: Props) {
           <p className="quiet">No changes were needed.</p>
         ) : (
           <>
-            {shown.length === 0 ? <p className="quiet">Every change was removed from view.</p> : null}
+            {shown.length === 0 ? <p className="quiet">Every change was deleted from the list.</p> : null}
             <ol className="changes" data-testid="change-list">
               {shown.map(({ c, i }) => (
                 <li key={`${c.ruleId}-${i}`} className="change">
@@ -50,7 +50,7 @@ export function ReviewPanel({ run, draft, canDismiss, onDismiss }: Props) {
                     </span>
                     {canDismiss ? (
                       <button type="button" className="btn btn-small btn-ghost item-remove" onClick={() => onDismiss('change', i, true)} data-testid="change-remove">
-                        Remove<span className="sr-only"> change {c.ruleId} from the list</span>
+                        Delete<span className="sr-only"> change {c.ruleId} from the list</span>
                       </button>
                     ) : null}
                   </div>
@@ -64,9 +64,9 @@ export function ReviewPanel({ run, draft, canDismiss, onDismiss }: Props) {
             {hidden.length > 0 ? (
               <details className="removed" data-testid="changes-removed">
                 <summary>
-                  Removed from view <span className="count">{hidden.length}</span>
+                  Deleted <span className="count">{hidden.length}</span>
                 </summary>
-                <p className="quiet">These stay in the record and in the saved report, marked as removed.</p>
+                <p className="quiet">Deleted from this list. They stay in the saved record, marked as deleted, and can be restored until you approve.</p>
                 <ul className="removed-list">
                   {hidden.map(({ c, i }) => (
                     <li key={`${c.ruleId}-${i}`}>

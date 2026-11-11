@@ -28,6 +28,11 @@ export function createSupabaseStorage(): Storage {
       const rows = await sql<{ data: RunRecord }[]>`select data from runs where id = ${id}`;
       return rows[0]?.data ?? null;
     },
+    async deleteRun(id) {
+      // feedback rows go with it (on delete cascade)
+      const res = await sql`delete from runs where id = ${id}`;
+      return res.count > 0;
+    },
     async listRuns(limit) {
       const rows = await sql<{ data: RunRecord }[]>`select data from runs order by created_at desc limit ${limit}`;
       return rows.map((r) => r.data);

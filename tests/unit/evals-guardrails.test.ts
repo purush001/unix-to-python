@@ -37,6 +37,42 @@ describe('S13 input guardrails: wrong content type', () => {
   });
 });
 
+describe('auto-detect accepts everyday scripts and still rejects prose', () => {
+  it('detects SQL without a terminator and short shell input without a "#!" line', () => {
+    const sql = ['select * from emp where deptno = 10', "UPDATE PS_JOB SET DEPTID = '10' WHERE EMPLID = '1'", "insert into t values (1, 'the a an is')", 'create table t (id number)', 'delete from ps_job where emplid = 1', 'WITH x AS (SELECT 1 a FROM dual) SELECT * FROM x', '-- report for the team, please run it\nSELECT a, b\nFROM t\nWHERE x = 1\nORDER BY 1'];
+    for (const s of sql) expect(classify(s).type, s).toBe('sql');
+    const shell = ['ls -l /tmp', 'cd /tmp\nls -l', 'echo "hello"', 'cp /a/b /c/d\nrm -f /tmp/x', 'grep ERROR app.log | wc -l', "awk '{print $1}' file.txt | sort | uniq -c", 'function log {\n  print "$1"\n}\nlog start', 'DB=PROD\nsqlplus -s user/pw@$DB @run.sql'];
+    for (const s of shell) expect(classify(s).type, s).toBe('shell');
+  });
+
+  it('a Ctrl-Z end-of-file marker left by an old editor is not binary content', () => {
+    expect(classify('select 1 from dual;\u001a').type).toBe('sql');
+    expect(classify('select 1 from dual;\u001a more \u0001 bytes').type).toBe('unsupported');
+  });
+
+  it('prose that merely contains SQL or command words stays unsupported', () => {
+    const prose = [
+      'Dear team, the payroll run moves to Thursday.',
+      'Select the rows you want from the list and delete them.',
+      'Please update the table and set the flag when you are done',
+      'Find the file and cat it to see what is in there.',
+      'Update Margaret on the status of the migration',
+      'create a new table for the customers',
+      'meeting notes\nbudget review\nnext steps',
+      'hello world',
+    ];
+    for (const s of prose) expect(classify(s).type, s).toBe('unsupported');
+  });
+
+  it('a single query pasted without ";" converts cleanly: the terminator is added and listed', async () => {
+    const r = await runFixture({ id: 'q', kind: 'golden', title: 'q', source: 'select * from emp where deptno = 10', hash: '' }, testProviders(), { keepOutputs: true });
+    expect(r.status).not.toBe('failed');
+    expect(r.errorCodes).toEqual([]);
+    expect(r.outputs[0].content.trimEnd().endsWith('select * from emp where deptno = 10;')).toBe(true);
+    expect(r.inventedRuleIds).toEqual([]);
+  });
+});
+
 describe('S13 input guardrails: encoding tricks', () => {
   it('finds an e-mail address hidden by percent-encoding or full-width characters, and a percent-encoded host', () => {
     const s = sanitize('-- owner mokafor%40northwind-hr.com and ｍｏｋａｆｏｒ＠northwind-hr.com\n-- scp to pshcmprd01%2Enorthwind-hr%2Ecom\nSELECT 1 FROM DUAL;\n', 'sql');

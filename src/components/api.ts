@@ -151,6 +151,7 @@ export const api = {
   run: (token: string, id: string) => json<RunView>(token, `/api/runs/${encodeURIComponent(id)}`),
   edit: (token: string, id: string, body: { file: string; content: string; note?: string }) => json<RunView>(token, `/api/runs/${encodeURIComponent(id)}/edit`, { method: 'POST', body }),
   dismiss: (token: string, id: string, body: { version: number; kind: 'change' | 'issue'; index: number; dismissed: boolean }) => json<RunView>(token, `/api/runs/${encodeURIComponent(id)}/dismiss`, { method: 'POST', body }),
+  deleteRun: (token: string, id: string) => json<{ id: string; deleted: boolean; savedCopyKept: boolean }>(token, `/api/runs/${encodeURIComponent(id)}`, { method: 'DELETE' }),
   status: (token: string) => json<StatusView>(token, '/api/status'),
   disableRule: (token: string, id: string) => json<{ id: string; status: string }>(token, `/api/rules/${encodeURIComponent(id)}/disable`, { method: 'POST' }),
 };
