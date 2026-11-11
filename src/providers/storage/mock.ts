@@ -65,6 +65,9 @@ export function createMockStorage(): Storage {
     async upsertRule(rule) {
       db.rules.set(rule.id, clone(rule));
     },
+    async deleteRule(id) {
+      return db.rules.delete(id);
+    },
     async getRule(id) {
       const r = db.rules.get(id);
       return r ? clone(r) : null;

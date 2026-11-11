@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { RunView, StatusView, TraceView } from '@/lib/api-types';
 import { mockGitState } from '@/providers/github/mock';
 import { mockDb } from '@/providers/storage/mock';
+import type { SkillRule } from '@/pipeline/types';
 import { freshDb } from '../helpers';
 
 const TOKEN = 'unit-test-access-token-0001';
@@ -234,5 +235,55 @@ describe('deleting a run from Recent runs', () => {
     // an abandoned "drafting" run can be deleted once it is clearly no longer running
     mockDb().runs.set(busy.id, { ...stored, state: 'drafting', updatedAt: new Date(Date.now() - 10 * 60 * 1000).toISOString() });
     expect((await del(busy.id)).status).toBe(200);
+  });
+});
+
+describe('deleting a learned rule', () => {
+  const rule = (id: string, over: Partial<SkillRule> = {}): SkillRule => ({ id, version: 1, platform: 'plsql', trigger: ['cursor-loop'], guidance: 'Prefer one set-based statement.', example: { before: 'x', after: 'y' }, sourceRunId: null, evalWitness: null, status: 'promoted', indexed: true, mirrored: true, ...over });
+  const del = async (id: string, token = TOKEN) =>
+    (await cold('@/app/api/rules/[id]/route', 'DELETE' as 'GET'))(new Request(`http://test.local/api/rules/${id}`, { method: 'DELETE', headers: { authorization: `Bearer ${token}` } }), params(id));
+  const status = async () => (await (await (await cold('@/app/api/status/route', 'GET'))(req('/api/status'))).json()) as StatusView;
+
+  it('removes the rule from storage so it is no longer listed or used; other rules stay', async () => {
+    mockDb().rules.set('learned-plsql_aaa', rule('learned-plsql_aaa'));
+    mockDb().rules.set('learned-plsql_bbb', rule('learned-plsql_bbb', { status: 'rejected', mirrored: false }));
+    expect((await status()).rules.map((r) => r.id)).toEqual(['learned-plsql_aaa', 'learned-plsql_bbb']);
+
+    const r = await del('learned-plsql_aaa');
+    expect(r.status).toBe(200);
+    expect(await r.json()).toEqual({ id: 'learned-plsql_aaa', deleted: true, mirroredCopyKept: true });
+    expect((await status()).rules.map((x) => x.id)).toEqual(['learned-plsql_bbb']);
+    // a conversion after the delete does not retrieve it
+    const run = await convert(SQL);
+    const t = (await (await (await cold('@/app/api/runs/[id]/trace/route', 'GET'))(req(`/api/runs/${run.id}/trace`), params(run.id))).json()) as TraceView;
+    expect(JSON.stringify(t.spans.find((s) => s.name === 'retrieval')?.attrs)).not.toContain('learned-plsql_aaa');
+    expect(mockDb().logs.find((l) => l.msg === 'rule deleted')?.data).toMatchObject({ ruleId: 'learned-plsql_aaa', status: 'promoted' });
+
+    expect(await (await del('learned-plsql_bbb')).json()).toMatchObject({ deleted: true, mirroredCopyKept: false });
+    expect((await status()).rules).toEqual([]);
+  });
+
+  it('refuses to delete when the rule cannot be taken out of the index first, and keeps the rule', async () => {
+    const { deleteRule } = await import('@/learning/loop');
+    const { createLogger } = await import('@/lib/logger');
+    const { createProviders } = await import('@/providers');
+    const { createMockStorage } = await import('@/providers/storage/mock');
+    mockDb().rules.set('learned-plsql_ddd', rule('learned-plsql_ddd'));
+    const providers = createProviders({ storage: createMockStorage() });
+    const broken = { ...providers, memory: { ...providers.memory, remove: async () => Promise.reject(new Error('index down')) } };
+    expect(await deleteRule('learned-plsql_ddd', { providers: broken, log: createLogger() })).toBe('index-unavailable');
+    expect(mockDb().rules.has('learned-plsql_ddd')).toBe(true);
+    // a rule that was never indexed (a candidate) does not need the index at all
+    mockDb().rules.set('learned-plsql_eee', rule('learned-plsql_eee', { status: 'candidate' }));
+    expect(await deleteRule('learned-plsql_eee', { providers: broken, log: createLogger() })).toMatchObject({ mirroredCopyKept: true });
+    expect(mockDb().rules.has('learned-plsql_eee')).toBe(false);
+  });
+
+  it('needs the access token, and answers 404 for an unknown rule or a built-in rule', async () => {
+    mockDb().rules.set('learned-plsql_ccc', rule('learned-plsql_ccc'));
+    expect((await del('learned-plsql_ccc', 'wrong-token')).status).toBe(401);
+    expect(mockDb().rules.has('learned-plsql_ccc')).toBe(true);
+    expect((await del('learned-nope')).status).toBe(404);
+    expect((await del('base-plsql-error-capture')).status).toBe(404);
   });
 });

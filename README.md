@@ -224,6 +224,7 @@ function: authenticate → validate (zod) → load state from storage → work �
 | `GET /api/runs/:id/trace` | The run's trace: every span with tokens, cost and latency, the witness, and the attached scores. No script text |
 | `GET /api/status` | Recent runs, dashboard metrics, alerts, learned rules with witnesses |
 | `POST /api/rules/:id/disable` | A human disables a learned rule (addition to the spec) |
+| `DELETE /api/rules/:id` | A human deletes a learned rule for good: removed from the index, then from storage. A copy mirrored to GitHub is kept |
 | `GET /api/health` | Which providers are mock or real; no configuration values |
 | `GET /api/cron/learn`, `GET /api/cron/cleanup` | Vercel Cron only; reject requests without `CRON_SECRET` |
 
@@ -443,7 +444,9 @@ effort, validator, output).
   at least one metric improves. It is saved in Supabase first, indexed in Chroma, and mirrored to
   `skills/learned/<platform>/<ruleId>.json` on the data branch. Otherwise it is rejected with a reason.
 - Learned rules guide generation only. They cannot change the sanitizer, validators or guardrails.
-- The status view lists rules with their witnesses; a person can disable any rule.
+- The status view lists rules with their witnesses; a person can disable any rule, or delete it for
+  good (with a confirm step). A deleted rule leaves the index before it leaves storage, so it can
+  never keep guiding conversions; if the index cannot be reached the delete is refused.
 
 ## Evals
 

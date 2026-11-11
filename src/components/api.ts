@@ -153,5 +153,6 @@ export const api = {
   dismiss: (token: string, id: string, body: { version: number; kind: 'change' | 'issue'; index: number; dismissed: boolean }) => json<RunView>(token, `/api/runs/${encodeURIComponent(id)}/dismiss`, { method: 'POST', body }),
   deleteRun: (token: string, id: string) => json<{ id: string; deleted: boolean; savedCopyKept: boolean }>(token, `/api/runs/${encodeURIComponent(id)}`, { method: 'DELETE' }),
   status: (token: string) => json<StatusView>(token, '/api/status'),
+  deleteRule: (token: string, id: string) => json<{ id: string; deleted: boolean; mirroredCopyKept: boolean }>(token, `/api/rules/${encodeURIComponent(id)}`, { method: 'DELETE' }),
   disableRule: (token: string, id: string) => json<{ id: string; status: string }>(token, `/api/rules/${encodeURIComponent(id)}/disable`, { method: 'POST' }),
 };

@@ -82,6 +82,8 @@ export interface Storage {
   deleteLogsBefore(isoTs: string): Promise<number>;
   upsertRule(rule: SkillRule): Promise<void>;
   getRule(id: string): Promise<SkillRule | null>;
+  /** Deletes a learned rule. Returns false when there was no such rule. */
+  deleteRule(id: string): Promise<boolean>;
   listRules(filter?: RuleFilter): Promise<SkillRule[]>;
   upsertExample(ex: ConversionExample): Promise<void>;
   listExamples(filter?: { platform?: Platform; unindexedOnly?: boolean }): Promise<ConversionExample[]>;

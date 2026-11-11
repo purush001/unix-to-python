@@ -68,6 +68,10 @@ export function createSupabaseStorage(): Storage {
                 on conflict (id) do update set platform = excluded.platform, status = excluded.status, version = excluded.version,
                   indexed = excluded.indexed, updated_at = now(), data = excluded.data`;
     },
+    async deleteRule(id) {
+      const res = await sql`delete from skill_rules where id = ${id}`;
+      return res.count > 0;
+    },
     async getRule(id) {
       const rows = await sql<{ data: SkillRule }[]>`select data from skill_rules where id = ${id}`;
       return rows[0]?.data ?? null;

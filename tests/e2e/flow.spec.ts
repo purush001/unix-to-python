@@ -110,5 +110,18 @@ test('convert, review, request changes, approve with a failed save and retry, ra
   await page.getByTestId('status-toggle').click();
   await expect(page.getByTestId('status-panel')).toContainText('GitHub save failures');
 
+  // the request for changes proposed a learned rule: delete it, after changing my mind once
+  const rules = page.getByTestId('rules').locator('li.rule-card');
+  await expect(rules).toHaveCount(1);
+  const ruleId = ((await rules.first().locator('code.rule').textContent()) ?? '').trim();
+  await rules.first().getByTestId('rule-delete').click();
+  await rules.first().getByRole('button', { name: 'Keep' }).click();
+  await expect(rules).toHaveCount(1);
+  await rules.first().getByTestId('rule-delete').click();
+  await rules.first().getByTestId('rule-delete-confirm').click();
+  await expect(page.getByTestId('rule-note')).toContainText(`Rule ${ruleId} was deleted.`);
+  await expect(page.getByTestId('rules')).toHaveCount(0);
+  await expect(page.getByTestId('status-panel')).toContainText('No learned rules yet.');
+
   expect(problems).toEqual([]);
 });
