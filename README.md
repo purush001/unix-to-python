@@ -93,7 +93,7 @@ evals/fixtures/, evals/     golden and adversarial fixtures, suite and runner
 supabase/migrations/        schema with Row Level Security
 scripts/                    check-secrets, verify-witness, replay, reindex-memory, migrate, vercel-ignore-build
 docs/                       audit (facts, gap report, VERIFY register), design decisions, evals, runbooks, release readiness,
-                            prompts (the reusable functional prompt this app can be rebuilt from)
+                            prompts (reusable functional and technical prompts this app can be rebuilt from)
 .github/workflows/ci.yml    typecheck, tests, evals against the baseline, build and browser flow, all on mocks
 vercel.json                 function durations, cron schedules, data-branch rules, region
 ```
