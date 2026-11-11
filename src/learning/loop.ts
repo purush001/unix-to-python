@@ -214,3 +214,24 @@ export async function disableRule(id: string, deps: Deps): Promise<SkillRule | n
   }
   return rule;
 }
+
+/**
+ * A human deletes a learned rule for good. It leaves the index first, so a deleted rule can
+ * never keep guiding conversions: if the index cannot be reached the rule is kept and the
+ * caller is told to disable it instead. The copy mirrored to the data branch is not removed.
+ */
+export async function deleteRule(id: string, deps: Deps): Promise<{ rule: SkillRule; mirroredCopyKept: boolean } | 'index-unavailable' | null> {
+  const rule = await deps.providers.storage.getRule(id);
+  if (!rule) return null;
+  if (rule.status === 'promoted' || rule.indexed === false) {
+    try {
+      await deps.providers.memory.remove('skill_rules', [rule.id]);
+    } catch {
+      deps.log.warn('rule delete refused: the index could not be reached', { ruleId: id });
+      return 'index-unavailable';
+    }
+  }
+  await deps.providers.storage.deleteRule(id);
+  deps.log.info('rule deleted', { ruleId: id, status: rule.status, platform: rule.platform });
+  return { rule, mirroredCopyKept: rule.mirrored === true };
+}

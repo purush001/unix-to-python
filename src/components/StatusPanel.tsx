@@ -87,6 +87,21 @@ export function StatusPanel({ token, onUnauthorized, refreshKey, onRunDeleted }:
     }
   };
 
+  const deleteRule = async (id: string) => {
+    setDeleting(id);
+    try {
+      const r = await api.deleteRule(token, id);
+      setNote(`Rule ${r.id} was deleted.${r.mirroredCopyKept ? ' Its copy on GitHub was kept.' : ''}`);
+      await load();
+    } catch (e) {
+      if (e instanceof ApiError && e.status === 401) onUnauthorized();
+      else setNote(e instanceof ApiError ? `${e.code}: ${e.message}` : 'The rule could not be deleted.');
+    } finally {
+      setDeleting(null);
+      setConfirming(null);
+    }
+  };
+
   const disable = async (id: string) => {
     try {
       const r = await api.disableRule(token, id);
@@ -112,7 +127,6 @@ export function StatusPanel({ token, onUnauthorized, refreshKey, onRunDeleted }:
       <p className="sr-only" role="status" aria-live="polite">
         {note}
       </p>
-      {note ? <p className="msg msg-ok">{note}</p> : null}
       {error ? (
         <p className="msg msg-error" role="alert">
           <span aria-hidden="true">✕ </span>
@@ -316,8 +330,22 @@ export function StatusPanel({ token, onUnauthorized, refreshKey, onRunDeleted }:
               Learned rules <span className="count">{data.rules.length}</span>
             </h3>
             {data.rules.length === 0 ? (
-              <p className="quiet">No learned rules yet. Rules are proposed from approved conversions and promoted only after their witness run passes.</p>
+              <>
+                {note ? (
+                  <p className="msg msg-ok" data-testid="rule-note">
+                    {note}
+                  </p>
+                ) : null}
+                <p className="quiet">No learned rules yet. Rules are proposed from approved conversions and promoted only after their witness run passes.</p>
+              </>
             ) : (
+              <>
+              <p className="quiet">Deleting a rule removes it from storage and from the index for good, so it no longer guides conversions. Disable keeps the rule and its witness but switches it off.</p>
+              {note ? (
+                <p className="msg msg-ok" data-testid="rule-note">
+                  {note}
+                </p>
+              ) : null}
               <ul className="rules" data-testid="rules">
                 {data.rules.map((r) => (
                   <li key={`${r.id}-${r.version}`} className="rule-card">
@@ -332,6 +360,20 @@ export function StatusPanel({ token, onUnauthorized, refreshKey, onRunDeleted }:
                           Disable
                         </button>
                       ) : null}
+                      {confirming === `rule:${r.id}` ? (
+                        <>
+                          <button type="button" className="btn btn-small btn-danger" onClick={() => void deleteRule(r.id)} disabled={deleting !== null} data-testid="rule-delete-confirm">
+                            {deleting === r.id ? 'Deleting…' : 'Delete for good'}
+                          </button>
+                          <button type="button" className="btn btn-small btn-ghost" onClick={() => setConfirming(null)} disabled={deleting !== null}>
+                            Keep
+                          </button>
+                        </>
+                      ) : (
+                        <button type="button" className="btn btn-small btn-ghost" onClick={() => setConfirming(`rule:${r.id}`)} disabled={deleting !== null} data-testid="rule-delete">
+                          Delete<span className="sr-only"> rule {r.id}</span>
+                        </button>
+                      )}
                     </div>
                     <p className="change-summary">{r.guidance}</p>
                     {r.trigger.length ? <p className="quiet">Applies to: {r.trigger.join(', ')}</p> : null}
@@ -352,6 +394,7 @@ export function StatusPanel({ token, onUnauthorized, refreshKey, onRunDeleted }:
                   </li>
                 ))}
               </ul>
+              </>
             )}
           </section>
         </div>

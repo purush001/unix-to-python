@@ -1,4 +1,4 @@
-import type { DraftView, RunView } from '@/lib/api-types';
+import type { DraftView, IssueView, RunView } from '@/lib/api-types';
 import type { EditorLanguage } from './editor-setup';
 import { emptyStages, type StageMap } from './StageTrack';
 
@@ -43,4 +43,25 @@ export async function copyText(text: string): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+export interface IssueEntry {
+  i: IssueView;
+  /** Index of the issue in the draft's issue list. */
+  n: number;
+}
+
+/**
+ * The same finding on several lines is one entry in the feedback panel: same code, severity,
+ * message and file. Findings with different messages stay separate.
+ */
+export function groupIssues(entries: IssueEntry[]): { first: IssueEntry; others: IssueEntry[] }[] {
+  const groups = new Map<string, { first: IssueEntry; others: IssueEntry[] }>();
+  for (const e of entries) {
+    const key = `${e.i.code}|${e.i.severity}|${e.i.file ?? ''}|${e.i.message}`;
+    const g = groups.get(key);
+    if (g) g.others.push(e);
+    else groups.set(key, { first: e, others: [] });
+  }
+  return [...groups.values()];
 }

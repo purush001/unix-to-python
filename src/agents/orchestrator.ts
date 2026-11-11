@@ -395,23 +395,27 @@ export async function applyEdit(run: RunRecord, fileName: string, rawContent: st
 /**
  * The reviewer removes a change-list item or a warning from view, or restores it. Nothing is
  * deleted: the item stays in the stored draft, the witness and the saved report, marked as
- * removed. An error can never be removed: it has to be fixed.
+ * removed. Deleting an error from the list does not change the draft's status.
  */
-export async function setDismissed(run: RunRecord, version: number, kind: 'change' | 'issue', index: number, dismissed: boolean, deps: Deps): Promise<RunRecord> {
-  if (run.final !== null || (run.state !== 'draft_ready' && run.state !== 'changes_requested')) throw new AppError('INVALID_STATE', `A run in state "${run.state}" is a fixed record; its lists can no longer be changed.`, 409, run.id);
+export async function setDismissed(run: RunRecord, version: number, kind: 'change' | 'issue', indexes: number[], dismissed: boolean, deps: Deps): Promise<RunRecord> {
+  // allowed at any time, also after approval: it changes what the lists show, never the record.
+  // (A report already saved to GitHub is not rewritten.) Errors can be deleted from the list too;
+  // that does not change the draft's status, which is computed from the full record.
   const draft = run.drafts.find((d) => d.version === version);
   if (!draft) throw new AppError('NOT_FOUND', 'No such draft version.', 404, run.id);
   const list = kind === 'change' ? draft.result.changes : draft.result.issues;
-  if (index < 0 || index >= list.length) throw new AppError('BAD_REQUEST', 'No such item.', 400, run.id);
-  if (kind === 'issue' && draft.result.issues[index].severity === 'error') throw new AppError('ISSUE_NOT_DISMISSIBLE', 'An error cannot be deleted from the list. Fix it by editing the target or asking for a fix.', 422, run.id);
+  if (indexes.length === 0 || indexes.some((i) => i < 0 || i >= list.length)) throw new AppError('BAD_REQUEST', 'No such item.', 400, run.id);
   const d = (draft.dismissed ??= { changes: [], issues: [] });
   const key = kind === 'change' ? 'changes' : 'issues';
   const set = new Set(d[key]);
-  if (dismissed) set.add(index);
-  else set.delete(index);
+  for (const i of indexes) {
+    if (dismissed) set.add(i);
+    else set.delete(i);
+  }
   d[key] = [...set].sort((a, b) => a - b);
   run.updatedAt = nowIso();
   await deps.providers.storage.saveRun(run);
-  deps.log.child({ runId: run.id, stage: 'review' }).info(dismissed ? 'item removed from view' : 'item restored', { version, kind, code: kind === 'issue' ? draft.result.issues[index].code : draft.result.changes[index].ruleId });
+  const codes = [...new Set(indexes.map((i) => (kind === 'issue' ? draft.result.issues[i].code : draft.result.changes[i].ruleId)))];
+  deps.log.child({ runId: run.id, stage: 'review' }).info(dismissed ? 'item removed from view' : 'item restored', { version, kind, count: indexes.length, codes, errors: kind === 'issue' ? indexes.filter((i) => draft.result.issues[i].severity === 'error').length : 0 });
   return run;
 }

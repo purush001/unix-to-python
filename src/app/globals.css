@@ -1376,6 +1376,18 @@ textarea {
   flex: 1 1 200px;
   min-width: 0;
 }
+.issue-also {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 8px;
+  margin-top: 8px;
+}
+.issue-also .btn {
+  min-height: 26px;
+  padding: 1px 9px;
+  font-size: 0.78rem;
+}
 .issue-actions {
   display: flex;
   flex-wrap: wrap;

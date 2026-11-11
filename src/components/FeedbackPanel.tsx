@@ -1,5 +1,6 @@
 'use client';
 
+import { groupIssues } from './run-helpers';
 import { useId, useState, type FormEvent } from 'react';
 import type { IssueView } from '@/lib/api-types';
 import type { FeedbackBody } from './api';
@@ -12,7 +13,8 @@ interface Props {
   /** Indexes of warnings the reviewer removed from view. */
   dismissed: number[];
   canDismiss: boolean;
-  onDismiss: (index: number, dismissed: boolean) => void;
+  /** Deletes (or restores) one entry, which may stand for the same finding on several lines. */
+  onDismiss: (indexes: number[], dismissed: boolean) => void;
   /** True while the output can still be changed (latest version of an unapproved draft). */
   canChange: boolean;
   /** Opens the target editor at this entry's line so the person can change the output by hand. */
@@ -26,7 +28,7 @@ function where(i: IssueView): string {
   return 'whole script';
 }
 
-function IssueItem({ issue, index, active, onSelect, onReport, onRemove, canRemoveOthers, onEdit, onFix }: { issue: IssueView; index: number; active: boolean; onSelect: Props['onSelect']; onReport: Props['onReport']; onRemove: (() => void) | null; canRemoveOthers: boolean; onEdit: (() => void) | null; onFix: (() => void) | null }) {
+function IssueItem({ issue, index, others, active, onSelect, onReport, onRemove, onEdit, onFix }: { issue: IssueView; index: number; others: { i: IssueView; n: number }[]; active: boolean; onSelect: Props['onSelect']; onReport: Props['onReport']; onRemove: (() => void) | null; onEdit: (() => void) | null; onFix: (() => void) | null }) {
   const id = useId();
   const [open, setOpen] = useState(false);
   const [comment, setComment] = useState('');
@@ -75,6 +77,16 @@ function IssueItem({ issue, index, active, onSelect, onReport, onRemove, canRemo
       <p id={`${id}-m`} className="issue-message">
         {issue.message}
       </p>
+      {others.length > 0 ? (
+        <p className="issue-also" data-testid="issue-also">
+          <span className="tiny-label">Same finding, {others.length + 1} places</span>
+          {[{ i: issue, n: index }, ...others].map(({ i, n }) => (
+            <button key={n} type="button" className="btn btn-small btn-ghost" onClick={() => onSelect(i, n)}>
+              {where(i)}
+            </button>
+          ))}
+        </p>
+      ) : null}
       <dl className="issue-more">
         <dt>What it means</dt>
         <dd>{issue.explanation}</dd>
@@ -101,14 +113,9 @@ function IssueItem({ issue, index, active, onSelect, onReport, onRemove, canRemo
             Report a problem
           </button>
         )}
-        {!onRemove && canRemoveOthers && issue.severity === 'error' ? (
-          <button type="button" className="btn btn-small btn-ghost" disabled title="An error cannot be deleted. Fix it with Change output or Ask for a fix." data-testid="issue-remove-blocked">
-            Delete<span className="sr-only"> is not available: an error has to be fixed</span>
-          </button>
-        ) : null}
         {onRemove ? (
           <button type="button" className="btn btn-small btn-ghost" onClick={onRemove} data-testid="issue-remove">
-            Delete<span className="sr-only"> this {issue.severity} from the list</span>
+            Delete<span className="sr-only"> this {issue.severity} from the list{others.length ? ` (all ${others.length + 1} places)` : ''}</span>
           </button>
         ) : null}
       </div>
@@ -141,8 +148,8 @@ function IssueItem({ issue, index, active, onSelect, onReport, onRemove, canRemo
 /** Every issue of the current draft, in plain language, each one a jump target. */
 export function FeedbackPanel({ issues, activeIndex, onSelect, onReport, dismissed, canDismiss, onDismiss, canChange, onEdit, onFix }: Props) {
   const all = issues.map((i, n) => ({ i, n }));
-  const shown = all.filter((x) => !dismissed.includes(x.n));
-  const hidden = all.filter((x) => dismissed.includes(x.n));
+  const shown = groupIssues(all.filter((x) => !dismissed.includes(x.n)));
+  const hidden = groupIssues(all.filter((x) => dismissed.includes(x.n)));
   return (
     <section className="panel feedback" aria-labelledby="feedback-h">
       <h3 id="feedback-h" className="panel-title">
@@ -158,21 +165,20 @@ export function FeedbackPanel({ issues, activeIndex, onSelect, onReport, dismiss
             Select an entry to jump to its line in the target script. Lines traced back to the source are marked there too.
             {canChange ? ' Use "Change output" to edit the target at that line yourself, or "Ask for a fix" to get a new draft.' : ''}
           </p>
-          {shown.length === 0 ? <p className="quiet">Every warning was deleted from the list.</p> : null}
+          {shown.length === 0 ? <p className="quiet">Every entry was deleted from the list.</p> : null}
           <ol className="issues" data-testid="issue-list">
-            {shown.map(({ i, n }) => (
+            {shown.map(({ first, others }) => (
               <IssueItem
-                key={`${i.code}-${i.line ?? 'w'}-${i.sourceLine ?? 's'}-${n}`}
-                issue={i}
-                index={n}
-                active={activeIndex === n}
+                key={`${first.i.code}-${first.i.line ?? 'w'}-${first.i.sourceLine ?? 's'}-${first.n}`}
+                issue={first.i}
+                index={first.n}
+                others={others}
+                active={activeIndex === first.n || others.some((o) => o.n === activeIndex)}
                 onSelect={onSelect}
                 onReport={onReport}
-                // an error can never be removed: it has to be fixed
-                onRemove={canDismiss && i.severity !== 'error' ? () => onDismiss(n, true) : null}
-                canRemoveOthers={canDismiss}
-                onEdit={canChange ? () => onEdit(i, n) : null}
-                onFix={canChange ? () => onFix(i) : null}
+                onRemove={canDismiss ? () => onDismiss([first.n, ...others.map((o) => o.n)], true) : null}
+                onEdit={canChange ? () => onEdit(first.i, first.n) : null}
+                onFix={canChange ? () => onFix(first.i) : null}
               />
             ))}
           </ol>
@@ -181,15 +187,18 @@ export function FeedbackPanel({ issues, activeIndex, onSelect, onReport, dismiss
               <summary>
                 Deleted <span className="count">{hidden.length}</span>
               </summary>
-              <p className="quiet">Deleted from this list. They stay in the saved record, marked as deleted, and can be restored until you approve.</p>
+              <p className="quiet">Deleted from this list. They stay in the saved record, marked as deleted, and can be restored at any time. Deleting an error does not change the draft&apos;s status.</p>
               <ul className="removed-list">
-                {hidden.map(({ i, n }) => (
-                  <li key={`${i.code}-${n}`}>
-                    <code className="rule">{i.code}</code>
-                    <span>{i.message}</span>
+                {hidden.map(({ first, others }) => (
+                  <li key={`${first.i.code}-${first.n}`}>
+                    <code className="rule">{first.i.code}</code>
+                    <span>
+                      {first.i.message}
+                      {others.length ? ` (${others.length + 1} places)` : ''}
+                    </span>
                     {canDismiss ? (
-                      <button type="button" className="btn btn-small btn-ghost" onClick={() => onDismiss(n, false)} data-testid="issue-restore">
-                        Restore<span className="sr-only"> {i.code}</span>
+                      <button type="button" className="btn btn-small btn-ghost" onClick={() => onDismiss([first.n, ...others.map((o) => o.n)], false)} data-testid="issue-restore">
+                        Restore<span className="sr-only"> {first.i.code}</span>
                       </button>
                     ) : null}
                   </li>

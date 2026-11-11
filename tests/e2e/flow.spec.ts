@@ -106,9 +106,32 @@ test('convert, review, request changes, approve with a failed save and retry, ra
   await expect(page.getByTestId('rating-confirmation')).toBeVisible();
   await expect(page.getByTestId('hook')).toHaveAttribute('data-state', 'done');
 
+  // the Delete buttons on the change list and the feedback panel are still there on a final, saved run
+  await expect(page.getByTestId('change-remove').first()).toBeVisible();
+  await expect(page.getByTestId('issue-remove').first()).toBeVisible();
+  const finalChanges = await page.getByTestId('change-list').locator('li.change').count();
+  await page.getByTestId('change-remove').first().click();
+  await expect(page.getByTestId('change-list').locator('li.change')).toHaveCount(finalChanges - 1);
+  await page.getByTestId('changes-removed').locator('summary').click();
+  await page.getByTestId('change-restore').click();
+  await expect(page.getByTestId('change-list').locator('li.change')).toHaveCount(finalChanges);
+
   // status view
   await page.getByTestId('status-toggle').click();
   await expect(page.getByTestId('status-panel')).toContainText('GitHub save failures');
+
+  // the request for changes proposed a learned rule: delete it, after changing my mind once
+  const rules = page.getByTestId('rules').locator('li.rule-card');
+  await expect(rules).toHaveCount(1);
+  const ruleId = ((await rules.first().locator('code.rule').textContent()) ?? '').trim();
+  await rules.first().getByTestId('rule-delete').click();
+  await rules.first().getByRole('button', { name: 'Keep' }).click();
+  await expect(rules).toHaveCount(1);
+  await rules.first().getByTestId('rule-delete').click();
+  await rules.first().getByTestId('rule-delete-confirm').click();
+  await expect(page.getByTestId('rule-note')).toContainText(`Rule ${ruleId} was deleted.`);
+  await expect(page.getByTestId('rules')).toHaveCount(0);
+  await expect(page.getByTestId('status-panel')).toContainText('No learned rules yet.');
 
   expect(problems).toEqual([]);
 });

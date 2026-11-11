@@ -2,6 +2,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { RunView, StatusView, TraceView } from '@/lib/api-types';
 import { mockGitState } from '@/providers/github/mock';
 import { mockDb } from '@/providers/storage/mock';
+import type { SkillRule } from '@/pipeline/types';
+import { groupIssues } from '@/components/run-helpers';
 import { freshDb } from '../helpers';
 
 const TOKEN = 'unit-test-access-token-0001';
@@ -128,21 +130,42 @@ describe('removing items from the change list and the feedback panel', () => {
     expect(report).toContain('_(removed from view by the reviewer)_');
     expect(report).toContain('**Removed from view by the reviewer.**');
     expect(report).toContain(d.issues[warning].code);
-    // an approved run is a fixed record
-    expect((await call('dismiss', run.id, { version: 1, kind: 'change', index: 0, dismissed: false })).status).toBe(409);
+    // the delete option stays after approval: it changes the lists, and the report already on GitHub is not rewritten
+    const commits = mockGitState().commits.length;
+    const restored = await call('dismiss', run.id, { version: 1, kind: 'change', index: 0, dismissed: false });
+    expect(restored.status).toBe(200);
+    expect(((await restored.json()) as RunView).drafts[0].dismissed.changes).toEqual([]);
+    const again = await call('dismiss', run.id, { version: 1, kind: 'change', index: 0, dismissed: true });
+    expect(again.status).toBe(200);
+    expect(((await again.json()) as RunView).drafts[0].dismissed.changes).toEqual([0]);
+    expect(mockGitState().commits).toHaveLength(commits);
   });
 
-  it('an error can never be removed, and bad indexes and versions are rejected', async () => {
+  it('an error can be deleted from the list too, several at once, and the draft stays failed', async () => {
     const run = await convert(SQL);
     const broken = await call('edit', run.id, { file: 'target.sql', content: run.drafts[0].files[0].content.replace('END LOOP;', '') });
     const v2 = ((await broken.json()) as RunView).drafts[1];
-    const error = v2.issues.findIndex((i) => i.severity === 'error');
-    const r = await call('dismiss', run.id, { version: 2, kind: 'issue', index: error, dismissed: true });
-    expect(r.status).toBe(422);
-    expect(((await r.json()) as { error: { code: string } }).error.code).toBe('ISSUE_NOT_DISMISSIBLE');
-    expect((await call('dismiss', run.id, { version: 2, kind: 'issue', index: 999, dismissed: true })).status).toBe(400);
+    const errors = v2.issues.map((i, n) => ({ i, n })).filter((x) => x.i.severity === 'error').map((x) => x.n);
+    expect(errors.length).toBeGreaterThan(0);
+    expect(v2.status).toBe('failed');
+    const r = await call('dismiss', run.id, { version: 2, kind: 'issue', indexes: errors, dismissed: true });
+    expect(r.status).toBe(200);
+    const after = ((await r.json()) as RunView).drafts[1];
+    expect(after.dismissed.issues).toEqual(errors);
+    // deleting an error from the list hides it; it does not make the draft pass
+    expect(after.status).toBe('failed');
+    expect(after.issues).toEqual(v2.issues);
+    const back = await call('dismiss', run.id, { version: 2, kind: 'issue', indexes: errors, dismissed: false });
+    expect(((await back.json()) as RunView).drafts[1].dismissed.issues).toEqual([]);
+  });
+
+  it('bad indexes, versions and kinds are rejected', async () => {
+    const run = await convert(SQL);
+    expect((await call('dismiss', run.id, { version: 1, kind: 'issue', index: 999, dismissed: true })).status).toBe(400);
+    expect((await call('dismiss', run.id, { version: 1, kind: 'issue', indexes: [0, 999], dismissed: true })).status).toBe(400);
+    expect((await call('dismiss', run.id, { version: 1, kind: 'issue', dismissed: true })).status).toBe(400);
     expect((await call('dismiss', run.id, { version: 9, kind: 'change', index: 0, dismissed: true })).status).toBe(404);
-    expect((await call('dismiss', run.id, { version: 2, kind: 'other', index: 0, dismissed: true })).status).toBe(400);
+    expect((await call('dismiss', run.id, { version: 1, kind: 'other', index: 0, dismissed: true })).status).toBe(400);
   });
 });
 
@@ -234,5 +257,70 @@ describe('deleting a run from Recent runs', () => {
     // an abandoned "drafting" run can be deleted once it is clearly no longer running
     mockDb().runs.set(busy.id, { ...stored, state: 'drafting', updatedAt: new Date(Date.now() - 10 * 60 * 1000).toISOString() });
     expect((await del(busy.id)).status).toBe(200);
+  });
+});
+
+describe('deleting a learned rule', () => {
+  const rule = (id: string, over: Partial<SkillRule> = {}): SkillRule => ({ id, version: 1, platform: 'plsql', trigger: ['cursor-loop'], guidance: 'Prefer one set-based statement.', example: { before: 'x', after: 'y' }, sourceRunId: null, evalWitness: null, status: 'promoted', indexed: true, mirrored: true, ...over });
+  const del = async (id: string, token = TOKEN) =>
+    (await cold('@/app/api/rules/[id]/route', 'DELETE' as 'GET'))(new Request(`http://test.local/api/rules/${id}`, { method: 'DELETE', headers: { authorization: `Bearer ${token}` } }), params(id));
+  const status = async () => (await (await (await cold('@/app/api/status/route', 'GET'))(req('/api/status'))).json()) as StatusView;
+
+  it('removes the rule from storage so it is no longer listed or used; other rules stay', async () => {
+    mockDb().rules.set('learned-plsql_aaa', rule('learned-plsql_aaa'));
+    mockDb().rules.set('learned-plsql_bbb', rule('learned-plsql_bbb', { status: 'rejected', mirrored: false }));
+    expect((await status()).rules.map((r) => r.id)).toEqual(['learned-plsql_aaa', 'learned-plsql_bbb']);
+
+    const r = await del('learned-plsql_aaa');
+    expect(r.status).toBe(200);
+    expect(await r.json()).toEqual({ id: 'learned-plsql_aaa', deleted: true, mirroredCopyKept: true });
+    expect((await status()).rules.map((x) => x.id)).toEqual(['learned-plsql_bbb']);
+    // a conversion after the delete does not retrieve it
+    const run = await convert(SQL);
+    const t = (await (await (await cold('@/app/api/runs/[id]/trace/route', 'GET'))(req(`/api/runs/${run.id}/trace`), params(run.id))).json()) as TraceView;
+    expect(JSON.stringify(t.spans.find((s) => s.name === 'retrieval')?.attrs)).not.toContain('learned-plsql_aaa');
+    expect(mockDb().logs.find((l) => l.msg === 'rule deleted')?.data).toMatchObject({ ruleId: 'learned-plsql_aaa', status: 'promoted' });
+
+    expect(await (await del('learned-plsql_bbb')).json()).toMatchObject({ deleted: true, mirroredCopyKept: false });
+    expect((await status()).rules).toEqual([]);
+  });
+
+  it('refuses to delete when the rule cannot be taken out of the index first, and keeps the rule', async () => {
+    const { deleteRule } = await import('@/learning/loop');
+    const { createLogger } = await import('@/lib/logger');
+    const { createProviders } = await import('@/providers');
+    const { createMockStorage } = await import('@/providers/storage/mock');
+    mockDb().rules.set('learned-plsql_ddd', rule('learned-plsql_ddd'));
+    const providers = createProviders({ storage: createMockStorage() });
+    const broken = { ...providers, memory: { ...providers.memory, remove: async () => Promise.reject(new Error('index down')) } };
+    expect(await deleteRule('learned-plsql_ddd', { providers: broken, log: createLogger() })).toBe('index-unavailable');
+    expect(mockDb().rules.has('learned-plsql_ddd')).toBe(true);
+    // a rule that was never indexed (a candidate) does not need the index at all
+    mockDb().rules.set('learned-plsql_eee', rule('learned-plsql_eee', { status: 'candidate' }));
+    expect(await deleteRule('learned-plsql_eee', { providers: broken, log: createLogger() })).toMatchObject({ mirroredCopyKept: true });
+    expect(mockDb().rules.has('learned-plsql_eee')).toBe(false);
+  });
+
+  it('needs the access token, and answers 404 for an unknown rule or a built-in rule', async () => {
+    mockDb().rules.set('learned-plsql_ccc', rule('learned-plsql_ccc'));
+    expect((await del('learned-plsql_ccc', 'wrong-token')).status).toBe(401);
+    expect(mockDb().rules.has('learned-plsql_ccc')).toBe(true);
+    expect((await del('learned-nope')).status).toBe(404);
+    expect((await del('base-plsql-error-capture')).status).toBe(404);
+  });
+});
+
+describe('feedback panel: the same finding on several lines is one entry', () => {
+  const entry = (n: number, code: string, message: string, line: number | null, severity: 'error' | 'warning' = 'error') => ({ n, i: { code, message, line, severity, explanation: '', nextStep: '' } as never });
+
+  it('groups by code, severity, message and file; different messages stay separate', () => {
+    const groups = groupIssues([
+      entry(0, 'SHELL_UNMAPPED_CONSTRUCT', 'This part of the shell script was not converted.', 41),
+      entry(1, 'SHELL_UNMAPPED_CONSTRUCT', 'This part of the shell script was not converted.', 82),
+      entry(2, 'REPAIR_NO_PROGRESS', 'A repair attempt left the same set of errors; repairing stopped early.', null, 'warning'),
+      entry(3, 'SQL_PARSE_ERROR', 'Unbalanced BEGIN.', 3),
+      entry(4, 'SQL_PARSE_ERROR', 'Missing terminator.', 9),
+    ]);
+    expect(groups.map((g) => [g.first.n, g.others.map((o) => o.n)])).toEqual([[0, [1]], [2, []], [3, []], [4, []]]);
   });
 });
