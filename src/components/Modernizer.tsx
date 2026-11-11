@@ -290,7 +290,7 @@ export function Modernizer() {
     if (!token || !run || !draft) return;
     try {
       setRun(await api.dismiss(token, run.id, { version: draft.version, kind, index, dismissed }));
-      setAnnouncement(dismissed ? 'Deleted from the list. It can be restored until you approve.' : 'Restored.');
+      setAnnouncement(dismissed ? 'Deleted from the list. It can be restored from the Deleted list.' : 'Restored.');
     } catch (e) {
       fail(e);
     }
@@ -332,7 +332,8 @@ export function Modernizer() {
   const canAct = run?.state === 'draft_ready' && !busy;
   const viewingLatest = draft !== null && latest !== null && draft.version === latest.version;
   const canEdit = canAct && viewingLatest && !!file && file.kind !== 'runtime';
-  const canDismiss = !!run && !busy && run.final === null && (run.state === 'draft_ready' || run.state === 'changes_requested');
+  // deleting from the lists stays available after approval: it changes the view, not the record
+  const canDismiss = !!run && !busy;
   const sourceLang = run && sourceIsSanitized ? sourceLanguageOf(run) : languageForSource(scriptType, source);
   const diffBefore = run && draft ? (diffBase === 'source' ? run.sanitizedSource : (run.drafts.find((d) => d.version === diffBase)?.files[0]?.content ?? run.sanitizedSource)) : '';
   const diffBeforeIsSource = diffBase === 'source' || !run?.drafts.some((d) => d.version === diffBase);

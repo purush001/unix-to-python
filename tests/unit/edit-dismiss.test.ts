@@ -129,8 +129,15 @@ describe('removing items from the change list and the feedback panel', () => {
     expect(report).toContain('_(removed from view by the reviewer)_');
     expect(report).toContain('**Removed from view by the reviewer.**');
     expect(report).toContain(d.issues[warning].code);
-    // an approved run is a fixed record
-    expect((await call('dismiss', run.id, { version: 1, kind: 'change', index: 0, dismissed: false })).status).toBe(409);
+    // the delete option stays after approval: it changes the lists, and the report already on GitHub is not rewritten
+    const commits = mockGitState().commits.length;
+    const restored = await call('dismiss', run.id, { version: 1, kind: 'change', index: 0, dismissed: false });
+    expect(restored.status).toBe(200);
+    expect(((await restored.json()) as RunView).drafts[0].dismissed.changes).toEqual([]);
+    const again = await call('dismiss', run.id, { version: 1, kind: 'change', index: 0, dismissed: true });
+    expect(again.status).toBe(200);
+    expect(((await again.json()) as RunView).drafts[0].dismissed.changes).toEqual([0]);
+    expect(mockGitState().commits).toHaveLength(commits);
   });
 
   it('an error can never be removed, and bad indexes and versions are rejected', async () => {

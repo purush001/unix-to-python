@@ -393,7 +393,8 @@ again; the selector overrides the detection for everything except those wrong co
 - **Delete from the lists.** Each change-list item and each warning has a "Delete" button. Deleted items
   move to a "Deleted" list and can be restored. Nothing is deleted: they stay in the
   stored draft and are marked as removed in the saved `report.md`. An error cannot be removed; it
-  has to be fixed. After approval the lists are a fixed record.
+  has to be fixed. The Delete buttons stay available after approval; a report already saved to GitHub is
+  not rewritten.
 - **Change the output from the feedback panel.** Each entry has two actions. "Change output" opens
   the target editor at that entry's line so you can fix it yourself. "Ask for a fix" requests a
   new draft with a note built from the entry (its code, line, message and next step). The page then

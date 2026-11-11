@@ -398,7 +398,8 @@ export async function applyEdit(run: RunRecord, fileName: string, rawContent: st
  * removed. An error can never be removed: it has to be fixed.
  */
 export async function setDismissed(run: RunRecord, version: number, kind: 'change' | 'issue', index: number, dismissed: boolean, deps: Deps): Promise<RunRecord> {
-  if (run.final !== null || (run.state !== 'draft_ready' && run.state !== 'changes_requested')) throw new AppError('INVALID_STATE', `A run in state "${run.state}" is a fixed record; its lists can no longer be changed.`, 409, run.id);
+  // allowed at any time, also after approval: it changes what the lists show, never the record.
+  // (A report already saved to GitHub is not rewritten.)
   const draft = run.drafts.find((d) => d.version === version);
   if (!draft) throw new AppError('NOT_FOUND', 'No such draft version.', 404, run.id);
   const list = kind === 'change' ? draft.result.changes : draft.result.issues;

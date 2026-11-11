@@ -66,7 +66,7 @@ export function ReviewPanel({ run, draft, canDismiss, onDismiss }: Props) {
                 <summary>
                   Deleted <span className="count">{hidden.length}</span>
                 </summary>
-                <p className="quiet">Deleted from this list. They stay in the saved record, marked as deleted, and can be restored until you approve.</p>
+                <p className="quiet">Deleted from this list. They stay in the saved record, marked as deleted, and can be restored at any time.</p>
                 <ul className="removed-list">
                   {hidden.map(({ c, i }) => (
                     <li key={`${c.ruleId}-${i}`}>
